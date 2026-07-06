@@ -50,7 +50,7 @@ export const actions: Actions = {
 				club: clubId
 			});
 
-			createEvent({
+			await createEvent({
 				title,
 				description,
 				start: start,

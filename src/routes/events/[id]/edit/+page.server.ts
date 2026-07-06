@@ -52,7 +52,7 @@ export const actions: Actions = {
 				club: clubId
 			});
 
-			updateEvent({
+			await updateEvent({
 				id,
 				title,
 				description,

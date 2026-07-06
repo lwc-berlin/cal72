@@ -37,21 +37,21 @@ export const GET: RequestHandler = async ({ request }) => {
 	if (ifNoneMatch === etag) {
 		return new Response(null, {
 			status: 304,
-			headers: { ETag: etag }
+			headers: { ETag: etag, 'Last-Modified': lastModifiedDate.toUTCString() }
 		});
 	}
 	const ifModifiedSince = request.headers.get('if-modified-since');
 	if (ifModifiedSince && new Date(ifModifiedSince).getTime() >= lastModified) {
 		return new Response(null, {
 			status: 304,
-			headers: { ETag: etag }
+			headers: { ETag: etag, 'Last-Modified': lastModifiedDate.toUTCString() }
 		});
 	}
 
 	return new Response(body, {
 		headers: {
 			'Content-Type': 'text/calendar; charset=utf-8',
-			'Cache-Control': 'no-cache',
+			'Cache-Control': 'private, max-age=300',
 			'Content-Disposition': 'inline; filename="cal72.ics"',
 			'X-Published-TTL': 'PT15M',
 			ETag: etag,
