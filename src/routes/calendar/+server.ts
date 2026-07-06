@@ -97,10 +97,12 @@ function foldLine(line: string): string {
 function escapeICalText(text: string): string {
 	if (!text) return '';
 	return text
-		.replace(/\\/g, '\\\\') // Backslash must be escaped first
+		.replace(/\r\n/g, '\n') // Normalize CRLF to LF first
+		.replace(/\r/g, '\n') // Normalize lone CR to LF
+		.replace(/\\/g, '\\\\') // Backslash must be escaped before we add our own
 		.replace(/;/g, '\\;') // Semicolon
 		.replace(/,/g, '\\,') // Comma
-		.replace(/\n/g, '\\n'); // Newline
+		.replace(/\n/g, '\\n'); // Newline (now only LF remains, no stray CR)
 }
 
 // Format datetime string for iCalendar (local time without conversion)
