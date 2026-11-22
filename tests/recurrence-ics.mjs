@@ -21,6 +21,21 @@ test('parsed master keeps UID, Berlin clock, interval and inclusive end', () => 
  while ((date = iterator.next())) dates.push(date.toString());
  assert.deepEqual(dates, ['2026-03-15T19:00:00','2026-03-29T19:00:00','2026-04-12T19:00:00']);
 });
+test('parsed inclusive cutoff excludes next Berlin day in summer and winter', () => {
+ for (const [start, until, expected] of [
+  ['2026-06-28', '2026-07-04', ['2026-06-28T01:00:00']],
+  ['2026-06-28', '2026-07-05', ['2026-06-28T01:00:00', '2026-07-05T01:00:00']],
+  ['2026-01-04', '2026-01-10', ['2026-01-04T01:00:00']],
+  ['2026-01-04', '2026-01-11', ['2026-01-04T01:00:00', '2026-01-11T01:00:00']]
+ ]) {
+  const calendar = new ICAL.Component(ICAL.parse(serialize({...fixture, start:start+'T01:00', end:start+'T02:00', recurrenceIntervalWeeks:1, recurrenceUntil:until})));
+  ICAL.TimezoneService.register(new ICAL.Timezone(calendar.getFirstSubcomponent('vtimezone')));
+  const iterator = new ICAL.Event(calendar.getFirstSubcomponent('vevent')).iterator();
+  const dates = []; let date;
+  while ((date = iterator.next())) dates.push(date.toString());
+  assert.deepEqual(dates, expected);
+ }
+});
 test('nonexistent END is explicitly excluded', () => {
  const calendar = new ICAL.Component(ICAL.parse(serialize({ ...fixture, start:'2026-03-15T01:30', end:'2026-03-15T02:30' })));
  assert.equal(calendar.getFirstSubcomponent('vevent').getFirstPropertyValue('exdate').toString(), '2026-03-29T01:30:00');

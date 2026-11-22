@@ -81,6 +81,17 @@ function formatICalTimestamp(date: Date): string {
 	return date.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
 }
 
+// Berlin's offset at the end of the selected local date determines the UTC cutoff.
+function berlinEndOfDay(date: string): Date {
+ const wall = Date.parse(date + 'T23:59:59Z');
+ const parts = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Europe/Berlin', timeZoneName: 'shortOffset'
+ }).formatToParts(wall);
+ const offset = parts.find(part => part.type === 'timeZoneName')!.value;
+ const hours = Number(offset.replace('GMT', ''));
+ return new Date(wall - hours * 3600000);
+}
+
 // Fold long lines per RFC 5545 §3.1 (max 75 octets per line)
 function foldLine(line: string): string {
 	const encoder = new TextEncoder();
@@ -192,7 +203,7 @@ function generateICal(stamp: Date, events: CalendarEvent[], rangeStart: Date, ra
    const horizon = Math.min(spec.recurrenceUntil ? Date.parse(spec.recurrenceUntil + 'T23:59:59Z') : Infinity, +rangeEnd);
    const master = expandOccurrences(spec, {from: Date.parse(spec.startDate) - 2 * 86400000, to: Date.parse(spec.startDate) + 369 * 86400000}).find(o => o.scheduledDate === spec.startDate);
    const masterDuration = master ? master.end - master.start : null;
-   recurrence.push(`RRULE:FREQ=WEEKLY;INTERVAL=${event.recurrenceIntervalWeeks}${spec.recurrenceUntil ? ';UNTIL=' + formatICalTimestamp(new Date(spec.recurrenceUntil + 'T23:59:59Z')) : ''}`);
+   recurrence.push(`RRULE:FREQ=WEEKLY;INTERVAL=${event.recurrenceIntervalWeeks}${spec.recurrenceUntil ? ';UNTIL=' + formatICalTimestamp(berlinEndOfDay(spec.recurrenceUntil)) : ''}`);
    const step = event.recurrenceIntervalWeeks * 7 * 86400000;
    const anchor = Date.parse(spec.startDate);
    // Validate in bounded chunks, including historical slots in the master rule.
