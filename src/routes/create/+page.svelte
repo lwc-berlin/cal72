@@ -40,6 +40,27 @@
 		</div>
 
 		<label>
+			Repeat every (weeks)
+			<input
+				type="number"
+				name="recurrenceIntervalWeeks"
+				min="0"
+				max="2147483647"
+				step="1"
+				value={form?.recurrenceIntervalWeeks ?? '0'}
+				aria-describedby="recurrence-help"
+			/>
+		</label>
+		<p id="recurrence-help">
+			0 means no repeat. Use 1 for weekly, or a larger number for every N weeks.
+		</p>
+		<label>
+			Repeat until (optional, inclusive)
+			<input type="date" name="recurrenceUntil" value={form?.recurrenceUntil ?? ''} />
+		</label>
+		<p>For repeating events, choose an end date or leave it empty to repeat indefinitely.</p>
+
+		<label>
 			Club (optional)
 			<select name="club">
 				<option value="">No club</option>
