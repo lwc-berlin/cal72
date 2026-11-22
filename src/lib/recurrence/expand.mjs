@@ -30,7 +30,7 @@ function resolve(wall) {
 export function expandOccurrences(schedule, {from, to}) {
  const {seriesId,startDate,startTime,endTime,endDayOffset,recurrenceIntervalWeeks: interval,recurrenceUntil} = schedule;
  if(typeof seriesId !== 'string' || !seriesId) throw new RangeError('seriesId required');
- if(!Number.isSafeInteger(interval) || interval < 1 || interval > 520000) throw new RangeError('Positive bounded interval required');
+ if(!Number.isSafeInteger(interval) || interval < 1 || interval > 2147483647) throw new RangeError('Positive bounded interval required');
  if(!Number.isInteger(endDayOffset) || endDayOffset < 0 || endDayOffset > 366) throw new RangeError('endDayOffset must be 0–366');
  if(!Number.isFinite(from) || !Number.isFinite(to) || from >= to || to-from > 3660*DAY || Math.abs(from)>8e15 || Math.abs(to)>8e15) throw new RangeError('Finite ordered range of at most 3660 days required');
  const anchor=date(startDate), startClock=time(startTime), endClock=time(endTime);

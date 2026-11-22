@@ -40,6 +40,47 @@ test('default listing preserves distant one-offs; explicit windows filter them',
  assert.equal((await ctx.list()).events.length,1);
  assert.equal((await ctx.list(new Date('2026-01-01Z'),new Date('2026-02-01Z'))).events.length,0);
 });
+test('explicit web range retains long and spring-gap one-offs', async () => {
+ const text = readFileSync('src/lib/server/db/events.ts','utf8');
+ const begin = text.indexOf('export const getWebOccurrences =');
+ const end = text.indexOf('/** Resolve only', begin);
+ const rows = [
+  {...fixture,id:1,start:'2025-01-01T12:00',end:'2027-01-01T12:00',recurrenceIntervalWeeks:null},
+  {...fixture,id:2,start:'2026-03-29T02:30',end:'2026-03-29T04:00',recurrenceIntervalWeeks:null}
+ ];
+ const chain = {from(){return this;},leftJoin(){return this;},where(){return Promise.resolve(rows);}};
+ const ctx = vm.createContext({db:{select:()=>chain},eventSelect:{},Events:{},Clubs:{},eq:()=>null,isNull:()=>null,expandOccurrences});
+ vm.runInContext(ts.transpile(text.slice(begin,end).replace('export const','const'),{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None})+'\nglobalThis.list=getWebOccurrences;',ctx);
+ const result = await ctx.list(new Date('2026-03-29T00:00Z'),new Date('2026-03-29T04:00Z'));
+ assert.deepEqual(Array.from(result.events, row => row.id), [1,2]);
+ assert.equal(result.issues.length,0);
+});
+async function listOneOff(row, from, to) {
+ const text = readFileSync('src/lib/server/db/events.ts','utf8');
+ const begin = text.indexOf('export const getWebOccurrences =');
+ const end = text.indexOf('/** Resolve only', begin);
+ const chain = {from(){return this;},leftJoin(){return this;},where(){return Promise.resolve([row]);}};
+ const ctx = vm.createContext({db:{select:()=>chain},eventSelect:{},Events:{},Clubs:{},eq:()=>null,isNull:()=>null,expandOccurrences});
+ vm.runInContext(ts.transpile(text.slice(begin,end).replace('export const','const'),{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None})+'\nglobalThis.list=getWebOccurrences;',ctx);
+ return ctx.list(new Date(from),new Date(to));
+}
+test('one-off autumn fold uses first instant across reversed wall-clock range', async () => {
+ const row = {...fixture,start:'2026-10-25T02:30',end:'2026-10-25T02:45',recurrenceIntervalWeeks:null};
+ const result = await listOneOff(row,'2026-10-25T00:40Z','2026-10-25T01:10Z');
+ assert.equal(result.events.length,1); assert.equal(result.events[0].start,row.start); assert.equal(result.issues.length,0);
+ assert.equal((await listOneOff(row,'2026-10-25T01:10Z','2026-10-25T01:20Z')).events.length,0);
+});
+test('one-off spring gap uses pre-transition offset', async () => {
+ const row = {...fixture,start:'2026-03-29T02:30',end:'2026-03-29T04:00',recurrenceIntervalWeeks:null};
+ const result = await listOneOff(row,'2026-03-29T01:20Z','2026-03-29T01:40Z');
+ assert.equal(result.events.length,1); assert.equal(result.events[0].start,row.start); assert.equal(result.issues.length,0);
+ assert.equal((await listOneOff(row,'2026-03-29T01:05Z','2026-03-29T01:20Z')).events.length,0);
+});
+test('long one-off overlaps explicit range without recurrence duration limit', async () => {
+ const row = {...fixture,start:'2025-01-01T12:00',end:'2027-01-01T12:00',recurrenceIntervalWeeks:null};
+ const result = await listOneOff(row,'2026-03-29T01:20Z','2026-03-29T01:40Z');
+ assert.equal(result.events.length,1); assert.equal(result.events[0].end,row.end); assert.equal(result.issues.length,0);
+});
 async function probe(now, rows, headers = {}) {
  class Clock extends Date { constructor(...args) { super(...(args.length ? args : [now])); } }
  const ctx = vm.createContext({ TextEncoder, console, expandOccurrences, Date: Clock, Response, crypto: webcrypto,

@@ -50,12 +50,12 @@ test('old anchor is discoverable in a finite later range and recurring mutations
   const edit = await request.get(path + '/edit');
   expect(edit.status()).toBe(400);
   expect(await edit.text()).toContain('Unsupported recurring edit or invalid id');
-  const deletion = await request.post(path + '?/delete', { form: {} });
+  const deletion = await request.post(path + '?/delete', { headers: { Accept: 'text/html' }, form: {} });
   expect(deletion.status()).toBe(400);
   expect(await deletion.text()).toContain(id === before[0].id ? 'Unsupported occurrence mutation' : 'Unsupported recurring mutation');
-  const update = await request.post(path + '/edit', { form: { title: title + ' forbidden', start: '2026-07-01T19:00', end: '2026-07-01T20:00', description: '', club: '' } });
+  const update = await request.post(path + '/edit', { headers: { Accept: 'text/html' }, form: { title: title + ' forbidden', start: '2026-07-01T19:00', end: '2026-07-01T20:00', description: '', club: '' } });
   expect(update.status()).toBe(400);
-  expect(await update.text()).toContain('Failed to update event.');
+  expect(await update.text()).toContain('Unsupported recurring edit or invalid id');
   expect(await occurrences(request, title, from, to)).toEqual(before);
  }
 });

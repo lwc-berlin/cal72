@@ -21,6 +21,10 @@ test('jumps from old anchor, every N weeks, half-open overlap', () => {
  assert.equal(rows[1].start-rows[0].start,14*86400000);
  assert.equal(rows[2].start-rows[1].start,14*86400000-3600000);
 });
+test('accepts maximum persisted interval at its anchor', () => {
+ const rows = expandOccurrences({...base, recurrenceIntervalWeeks:2147483647}, range);
+ assert.deepEqual(rows.map(row => row.scheduledDate), ['2026-03-22']);
+});
 test('rejects invalid and excessively large requests', () => {
  for(const change of [{recurrenceIntervalWeeks:0},{startDate:'2026-02-30'},{endDayOffset:-1}]) assert.throws(()=>expandOccurrences({...base,...change},range));
  assert.throws(()=>expandOccurrences(base,{from:0,to:Infinity}));

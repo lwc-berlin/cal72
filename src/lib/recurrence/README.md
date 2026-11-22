@@ -6,4 +6,4 @@ Uses standard Intl with explicit Europe/Berlin and UTC calendar arithmetic, not 
 
 Identity is a JSON tuple of series ID and original scheduled local date/time, never query position or resolved UTC offset. Future exception consumers must retain this original slot when moving an occurrence; cross-schedule weekday remapping is not implemented.
 
-Supporting checks: `node --test tests/recurrence-expansion.mjs`. These are utility tests only. Persistence wiring, exceptions, UI, ICS standards and Google/Apple acceptance remain pending. No existing one-off code is changed.
+Supporting checks: `node --test tests/recurrence-expansion.mjs`. These are utility tests only. The last public browser/database run passed 19/19 before subsequent interval and one-off corrections; those corrections have not received an integrated rerun. Later exception capabilities and Google/Apple acceptance remain pending.

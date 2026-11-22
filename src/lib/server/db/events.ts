@@ -192,15 +192,21 @@ export const getWebOccurrences = async (
   if (recurrenceIntervalWeeks === null) {
    if (includeAllOneOffs) events.push(original);
    else {
-    // Resolve stored Berlin wall times only for filtering; keep the original payload.
-    const startDate = row.start.slice(0, 10);
-    const endDayOffset = (Date.parse(row.end.slice(0, 10)) - Date.parse(startDate)) / 86400000;
-    const matches = expandOccurrences({
-     seriesId: String(row.id), startDate, startTime: row.start.slice(11, 16),
-     endTime: row.end.slice(11, 16), endDayOffset,
-     recurrenceIntervalWeeks: 1, recurrenceUntil: startDate
-    }, { from: lower - 1, to: upper + 1 });
-    if (matches.length) events.push(original);
+    // Legacy one-offs use Berlin wall times. First fold instant; pre-gap offset.
+    // Do not apply recurrence's date, duration, or nonexistent-time rules.
+    const formatter = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Berlin', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' });
+    const offset = (instant: number) => {
+     const p = Object.fromEntries(formatter.formatToParts(new Date(instant)).map(part => [part.type, part.value]));
+     return Date.parse(`${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}:${p.second}Z`) - instant;
+    };
+    const resolveOneOff = (value: string) => {
+     const wall = Date.parse(value.slice(0, 19) + (value.length === 16 ? ':00' : '') + 'Z');
+     if (!Number.isFinite(wall)) return NaN;
+     const offsets = [...new Set([-2, -1, 0, 1, 2].map(day => offset(wall + day * 86400000)))];
+     const candidates = offsets.map(o => wall - o).filter(instant => offset(instant) === wall - instant).sort((a, b) => a - b);
+     return candidates[0] ?? wall - offset(wall - 2 * 86400000);
+    };
+    if (resolveOneOff(row.end) >= lower && resolveOneOff(row.start) <= upper) events.push(original);
    }
    continue;
   }
