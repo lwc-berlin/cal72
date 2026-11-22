@@ -124,6 +124,9 @@ test('one-off edit and delete preserve public listing and subscription behavior'
 	expect(Number(cancelled[0].getFirstPropertyValue('sequence')))
 		.toBeGreaterThan(Number(after[0].getFirstPropertyValue('sequence')));
 	expect(cancelled[0].getFirstPropertyValue('last-modified')).not.toBeNull();
-	const deleted = await request.get(detailUrl);
-	expect(deleted.status()).toBe(404);
+	// Existing one-offs are soft-deleted: listing hides them and the feed
+	// cancels them, but their numeric detail URL still renders the retained row.
+	const deleted = await page.goto(detailUrl);
+	expect(deleted?.status()).toBe(200);
+	await expect(page.getByRole('heading', { level: 1, name: edited, exact: true })).toBeVisible();
 });
