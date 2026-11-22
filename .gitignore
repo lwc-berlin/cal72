@@ -29,3 +29,7 @@ vite.config.ts.timestamp-*
 
 # Fallow
 .fallow
+
+# Public test output
+/test-results/
+/playwright-report/
