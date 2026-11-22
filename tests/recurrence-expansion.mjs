@@ -26,3 +26,11 @@ test('rejects invalid and excessively large requests', () => {
  assert.throws(()=>expandOccurrences(base,{from:0,to:Infinity}));
  assert.throws(()=>expandOccurrences(base,{from:0,to:86400000*4000}));
 });
+
+test('skips missing Berlin end without shifting or losing surrounding weeks', () => {
+ const rows = expandOccurrences({...base, startTime:'01:30', endTime:'02:30'}, range);
+ assert.deepEqual(rows, [
+  {id:JSON.stringify(['s','2026-03-22T01:30']), scheduledDate:'2026-03-22', start:Date.parse('2026-03-22T00:30Z'), end:Date.parse('2026-03-22T01:30Z')},
+  {id:JSON.stringify(['s','2026-04-05T01:30']), scheduledDate:'2026-04-05', start:Date.parse('2026-04-04T23:30Z'), end:Date.parse('2026-04-05T00:30Z')}
+ ]);
+});

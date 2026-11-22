@@ -25,7 +25,7 @@ function resolve(wall) {
 }
 /** Pure weekly expansion. Range is half-open epoch milliseconds, matched by overlap.
  * Null interval denotes a non-series and is deliberately rejected (one-offs stay untouched).
- * Missing local end times reject the request rather than silently changing duration.
+ * Missing local starts or ends skip that occurrence without shifting wall times.
  */
 export function expandOccurrences(schedule, {from, to}) {
  const {seriesId,startDate,startTime,endTime,endDayOffset,recurrenceIntervalWeeks: interval,recurrenceUntil} = schedule;
@@ -49,7 +49,8 @@ export function expandOccurrences(schedule, {from, to}) {
   const start=resolve(day+startClock);
   if(start===undefined) continue;
   const end=resolve(day+endDayOffset*DAY+endClock);
-  if(end===undefined || end<=start) throw new RangeError('Unresolvable local end');
+  if(end===undefined) continue;
+  if(end<=start) throw new RangeError('Unresolvable local end');
   if(start<to && end>from) result.push({id:JSON.stringify([seriesId,scheduledDate+'T'+startTime]),scheduledDate,start,end});
  }
  return result;
