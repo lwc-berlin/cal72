@@ -4,6 +4,7 @@ import ICAL from 'ical.js';
 test('one-off creation retains a stable subscription identity', async ({ page, request }) => {
 	const title = 'One-off ' + crypto.randomUUID();
 	await page.goto('/create');
+	await expect(page.locator('form')).toHaveAttribute('data-hydrated', 'true');
 	await page.getByLabel('Title', { exact: true }).fill(title);
 	await page.getByLabel('Start', { exact: true }).fill('2026-07-01T19:00');
 	await page.getByLabel('End', { exact: true }).fill('2026-07-01T20:00');
@@ -22,6 +23,7 @@ test('one-off creation retains a stable subscription identity', async ({ page, r
 
 test('organizer can opt into weekly recurrence', async ({ page }) => {
 	await page.goto('/create');
+	await expect(page.locator('form')).toHaveAttribute('data-hydrated', 'true');
 	await expect(page.getByLabel('Repeat every (weeks)')).toHaveValue('0');
 });
 
@@ -39,6 +41,7 @@ for (const [interval, until] of [
 	test(`creation rejects recurrence ${interval} / ${until}`, async ({ page }) => {
 		const title = 'Rejected series ' + crypto.randomUUID();
 		await page.goto('/create');
+	await expect(page.locator('form')).toHaveAttribute('data-hydrated', 'true');
 		await page.getByLabel('Title', { exact: true }).fill(title);
 		await page.getByLabel('Start', { exact: true }).fill('2026-07-01T19:00');
 		await page.getByLabel('End', { exact: true }).fill('2026-07-01T20:00');
@@ -82,6 +85,7 @@ for (const [interval, until] of [
 	test(`creation accepts series ${interval} / ${until}`, async ({ page }) => {
 		const title = 'Series ' + crypto.randomUUID();
 		await page.goto('/create');
+	await expect(page.locator('form')).toHaveAttribute('data-hydrated', 'true');
 		await page.getByLabel('Title', { exact: true }).fill(title);
 		await page.getByLabel('Start', { exact: true }).fill('2026-07-01T19:00');
 		await page.getByLabel('End', { exact: true }).fill('2026-07-02T01:00');

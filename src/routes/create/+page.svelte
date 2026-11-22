@@ -1,12 +1,16 @@
 <script lang="ts">
 	import type { PageProps } from './$types';
+	import { onMount } from 'svelte';
+
+	let hydrated = $state(false);
+	onMount(() => { hydrated = true; });
 
 	let { data, form }: PageProps = $props();
 </script>
 
 <main class="create-event">
 	<h1>Create New Event</h1>
-	<form method="post">
+	<form method="post" data-hydrated={hydrated}>
 		{#if form?.success == false}<p class="alert error">{form?.message}</p>{/if}
 		{#if form?.success}<p class="alert success">{form?.message}</p>{/if}
 
