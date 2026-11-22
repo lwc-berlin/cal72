@@ -82,7 +82,7 @@ for (const [interval, until] of [
 	['2', '2026-07-01'],
 	['3', '2026-08-01']
 ]) {
-	test(`creation accepts series ${interval} / ${until}`, async ({ page }) => {
+	test(`creation accepts series ${interval} / ${until}`, async ({ page, request }) => {
 		const title = 'Series ' + crypto.randomUUID();
 		await page.goto('/create');
 	await expect(page.locator('form')).toHaveAttribute('data-hydrated', 'true');
@@ -120,6 +120,37 @@ for (const [interval, until] of [
 		await expect(scheduledStart).toHaveCount(1);
 		// The detail payload serializes the 19:00 Berlin scheduled start as UTC.
 		await expect(scheduledStart).toHaveAttribute('datetime', '2026-07-01T17:00:00.000Z');
-		// Pending: parsed recurrence ICS, expansion, inclusive end, and overnight end semantics.
+		// Public feed, parsed rather than matched as serialized text. These assertions
+		// have not yet been executed in the isolated integrated harness.
+		const feed = await request.get('/calendar');
+		expect(feed.status()).toBe(200);
+		const components = new ICAL.Component(ICAL.parse(await feed.text()))
+			.getAllSubcomponents('vevent');
+		const masters = components.filter((event) =>
+			event.getFirstPropertyValue('summary') === title &&
+			!event.hasProperty('recurrence-id'));
+		expect(masters).toHaveLength(1);
+		const master = masters[0];
+		const rule = master.getFirstPropertyValue('rrule') as ICAL.Recur;
+		expect(rule.freq).toBe('WEEKLY');
+		expect(rule.interval).toBe(Number(interval));
+		expect(Boolean(rule.until)).toBe(Boolean(until));
+		const parsedEvent = new ICAL.Event(master);
+		expect(parsedEvent.startDate.toString()).toBe('2026-07-01T19:00:00');
+		expect(parsedEvent.endDate.toString()).toBe('2026-07-02T01:00:00');
+		const iterator = parsedEvent.iterator();
+		const first = iterator.next()!;
+		expect(first.toString()).toBe('2026-07-01T19:00:00');
+		const second = iterator.next();
+		if (interval === '2') expect(second).toBeNull();
+		else expect(second!.toString()).toBe(interval === '1'
+			? '2026-07-08T19:00:00' : '2026-07-22T19:00:00');
+		if (interval === '3') expect(iterator.next()).toBeNull();
+		const refreshed = await request.get('/calendar');
+		expect(refreshed.status()).toBe(200);
+		const same = new ICAL.Component(ICAL.parse(await refreshed.text()))
+			.getAllSubcomponents('vevent').find((event) =>
+				event.getFirstPropertyValue('summary') === title && !event.hasProperty('recurrence-id'));
+		expect(same?.getFirstPropertyValue('uid')).toBe(master.getFirstPropertyValue('uid'));
 	});
 }
