@@ -14,11 +14,11 @@ async function handler(query) {
  });
  return { response: await exports.GET({ url: new URL('http://localhost/api/occurrences' + query) }), calls };
 }
-for (const query of ['', '?start=no&end=no', '?start=2026-02-30T00:00:00.000Z&end=2026-03-04T00:00:00.000Z', '?start=2026-01-01T00:00:00.000Z&end=2026-01-01T00:00:00.000Z', '?start=2026-01-01T00:00:00.000Z&end=2040-01-01T00:00:00.000Z']) {
+for (const query of ['?start=2026-02-01T00:00:00.000Z&end=2026-01-01T00:00:00.000Z', '?start=2026-01-01T00:00:00.000Z', '?end=2026-02-01T00:00:00.000Z', '?start=2026-01-01T00:00:00.000Z&start=2026-01-02T00:00:00.000Z&end=2026-02-01T00:00:00.000Z', '', '?start=no&end=no', '?start=2026-02-30T00:00:00.000Z&end=2026-03-04T00:00:00.000Z', '?start=2026-01-01T00:00:00.000Z&end=2026-01-01T00:00:00.000Z', '?start=2026-01-01T00:00:00.000Z&end=2040-01-01T00:00:00.000Z']) {
  test('reject range ' + query, async () => {
   const { response, calls } = await handler(query);
   assert.equal(response.status, 400);
-  assert.equal(typeof (await response.json()).error, 'string');
+  assert.deepEqual(await response.json(), { error: 'Explicit ordered UTC ISO dates spanning at most 3660 days required' });
   assert.equal(calls.length, 0);
  });
 }

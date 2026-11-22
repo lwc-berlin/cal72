@@ -21,3 +21,22 @@ test('calendar encodes composite IDs and discloses navigation limitation', () =>
  assert.match(source, /eventSources:/);
  assert.match(source, /range.start.toISOString/);
 });
+
+for (const olderFails of [false, true]) test(`latest request owns diagnostics (older fails: ${olderFails})`, async () => {
+ const source = readFileSync('src/routes/+page.svelte', 'utf8');
+ const body = source.split('eventSources: [{ events: async (range: { start: Date; end: Date }) => {')[1].split('} }],')[0].replace('event: any', 'event');
+ const pending = [];
+ const factory = new Function('fetch', `let requestGeneration = 0; let occurrenceIssues = []; let loadError = ''; return { run: async (range) => {${body}}, state: () => ({ occurrenceIssues, loadError }) };`);
+ const api = factory(() => new Promise(resolve => pending.push(resolve)));
+ const range = { start: new Date('2026-01-01Z'), end: new Date('2026-02-01Z') };
+ const a = api.run(range).catch(error => error);
+ const b = api.run(range);
+ const events = [{ id: 'B' }];
+ pending[1]({ ok: true, json: async () => ({ issues: ['B'], events }) });
+ assert.equal((await b)[0].id, 'B');
+ pending[0]({ ok: !olderFails, json: async () => ({ issues: ['A'], events: [{ id: 'A' }] }) });
+ const result = await a;
+ if (olderFails) assert.ok(result instanceof Error);
+ else assert.equal(result[0].id, 'A');
+ assert.deepEqual(api.state(), { occurrenceIssues: ['B'], loadError: '' });
+});

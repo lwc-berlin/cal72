@@ -7,6 +7,7 @@
 
 	let occurrenceIssues = $state(data.occurrenceIssues);
 	let loadError = $state('');
+	let requestGeneration = 0;
 
 	let currentView = $state('dayGridMonth');
 	let calendarDate = $state(new Date());
@@ -21,17 +22,20 @@
 		dayMaxEvents: true,
 		moreLinkContent: (arg: any) => `+${arg.num}`,
 		eventSources: [{ events: async (range: { start: Date; end: Date }) => {
+            const generation = ++requestGeneration;
             try {
                 const query = new URLSearchParams({ start: range.start.toISOString(), end: range.end.toISOString() });
                 const response = await fetch(`/api/occurrences?${query}`);
                 if (!response.ok) throw new Error('Could not load the requested calendar range.');
                 const result = await response.json();
-                occurrenceIssues = result.issues;
-                loadError = '';
+                if (generation === requestGeneration) {
+                    occurrenceIssues = result.issues;
+                    loadError = '';
+                }
                 return result.events.map((event: any) => ({ ...event,
                     backgroundColor: event.club?.color || undefined, textColor: 'black' }));
             } catch (error) {
-                loadError = 'Could not load the requested calendar range. This view may be incomplete.';
+                if (generation === requestGeneration) loadError = 'Could not load the requested calendar range. This view may be incomplete.';
                 throw error;
             }
         } }],
