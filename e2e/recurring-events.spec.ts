@@ -94,13 +94,19 @@ for (const [interval, until] of [
 		await page.getByRole('button', { name: 'Create Event' }).click();
 		await expect(page.getByText('Event created successfully: ' + title, { exact: true })).toBeVisible();
 		await page.goto('/events');
-		const eventLink = page.getByRole('link', { name: title, exact: true });
-		await expect(eventLink).toHaveCount(1);
-		// Past entries may be inside the collapsed Past Events disclosure.
-		await eventLink.evaluate((link) => {
-			const disclosure = link.closest('details');
-			if (disclosure) disclosure.open = true;
+		// Open past occurrences before querying accessible links. A recurring title
+		// legitimately occurs many times; identify the anchor by its displayed instant.
+		await page.getByText(/^Past Events \(/).click();
+		const cards = page.locator('article').filter({
+			has: page.getByRole('link', { name: title, exact: true })
 		});
+		const anchor = cards.filter({
+			has: page.locator('time[datetime="2026-07-01T17:00:00.000Z"]')
+		});
+		await expect(anchor).toHaveCount(1);
+		if (until) await expect(cards).toHaveCount(interval === '2' ? 1 : 2);
+		const eventLink = anchor.getByRole('link', { name: title, exact: true });
+		await expect(eventLink).toHaveAttribute('href', /2026-07-01T19%3A00/);
 		await eventLink.click();
 		await expect(page.getByRole('heading', { name: title, exact: true })).toBeVisible();
 		await expect(page.locator('time')).toHaveAttribute('datetime', '2026-07-01T19:00');
