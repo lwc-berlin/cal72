@@ -1,3 +1,4 @@
+import { expandOccurrences } from '../../recurrence/expand.mjs';
 import { db } from './index';
 import { Clubs, Events } from './schema';
 import { and, desc, eq, gte, lte, lt, isNull, isNotNull, sql } from 'drizzle-orm';
@@ -155,4 +156,52 @@ export const pruneDeletedEvents = async (olderThanDays = 180) => {
 		.where(and(isNotNull(Events.deletedAt), lt(Events.end, cutoff.toISOString())))
 		.returning();
 	return result.length;
+};
+
+/** Separate from raw ICS queries. Defaults cover one year either side of now.
+ * One-offs retain their original shape. Series failures are explicit diagnostics,
+ * not a policy decision to skip an invalid local END or to shift its time.
+ * Consumers MUST expose issues before using this as a complete event listing.
+ */
+export const getWebOccurrences = async (
+ from = new Date(Date.now() - 366 * 86400000),
+ to = new Date(Date.now() + 366 * 86400000)
+) => {
+ const lower = from.getTime(), upper = to.getTime();
+ if (!Number.isFinite(lower) || !Number.isFinite(upper) || lower >= upper || upper - lower > 3660 * 86400000) {
+  throw new RangeError('Finite ordered range of at most 3660 days required');
+ }
+ // Do not filter by anchor end: an old series can still have visible slots.
+ const rows = await db.select({ ...eventSelect,
+  recurrenceIntervalWeeks: Events.recurrenceIntervalWeeks,
+  recurrenceUntil: Events.recurrenceUntil
+ }).from(Events).leftJoin(Clubs, eq(Events.club, Clubs.id))
+  .where(isNull(Events.deletedAt));
+ type Row = Awaited<ReturnType<typeof getAllEvents>>[number];
+ const events: (Row | (Omit<Row, 'id'> & { id: string; seriesId: number; scheduledDate: string }))[] = [];
+ const issues: { seriesId: number; message: string }[] = [];
+ for (const row of rows) {
+  const { recurrenceIntervalWeeks, recurrenceUntil, ...original } = row;
+  if (recurrenceIntervalWeeks === null) {
+   if (row.start <= to.toISOString() && row.end >= from.toISOString()) events.push(original);
+   continue;
+  }
+  try {
+   const startDate = row.start.slice(0, 10);
+   const endDate = row.end.slice(0, 10);
+   const endDayOffset = (Date.parse(endDate + 'T00:00:00Z') - Date.parse(startDate + 'T00:00:00Z')) / 86400000;
+   for (const occurrence of expandOccurrences({
+    seriesId: String(row.id), startDate, startTime: row.start.slice(11, 16),
+    endTime: row.end.slice(11, 16), endDayOffset, recurrenceIntervalWeeks, recurrenceUntil
+   }, { from: lower, to: upper })) {
+    events.push({ ...original, id: occurrence.id, seriesId: row.id,
+     scheduledDate: occurrence.scheduledDate,
+     start: new Date(occurrence.start).toISOString(), end: new Date(occurrence.end).toISOString() });
+   }
+  } catch (error) {
+   issues.push({ seriesId: row.id, message: error instanceof Error ? error.message : 'Expansion failed' });
+  }
+ }
+ events.sort((a, b) => a.start.localeCompare(b.start));
+ return { events, issues };
 };
