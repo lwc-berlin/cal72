@@ -7,11 +7,11 @@ trap 'docker rm -f "$container" >/dev/null 2>&1 || true' EXIT
 docker run -d --name "$container" -e POSTGRES_PASSWORD=synthetic-test-only postgres:17-alpine >/dev/null
 ready=false
 for attempt in {1..30}; do
-	if docker exec "$container" pg_isready -U postgres >/dev/null 2>&1; then ready=true; break; fi
+	if docker exec "$container" pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1; then ready=true; break; fi
 	sleep 1
 done
-"$ready" || { echo 'PostgreSQL did not become ready' >&2; exit 1; }
-psql() { docker exec -i "$container" psql -X -v ON_ERROR_STOP=1 -U postgres "$@"; }
+"$ready" || { echo 'PostgreSQL TCP server did not become ready after 30 attempts' >&2; exit 1; }
+psql() { docker exec -i "$container" psql -h 127.0.0.1 -X -v ON_ERROR_STOP=1 -U postgres "$@"; }
 for migration in drizzle/000{0,1,2}_*.sql; do psql < "$migration"; done
 psql <<'SQL'
 INSERT INTO events (title, start_time, end_time, sequence) VALUES
