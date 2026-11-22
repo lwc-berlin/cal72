@@ -168,9 +168,12 @@ export const pruneDeletedEvents = async (olderThanDays = 180) => {
  * Consumers MUST expose issues before using this as a complete event listing.
  */
 export const getWebOccurrences = async (
- from = new Date(Date.now() - 366 * 86400000),
- to = new Date(Date.now() + 366 * 86400000)
+ from?: Date,
+ to?: Date
 ) => {
+ const includeAllOneOffs = from === undefined && to === undefined;
+ from ??= new Date(Date.now() - 366 * 86400000);
+ to ??= new Date(Date.now() + 366 * 86400000);
  const lower = from.getTime(), upper = to.getTime();
  if (!Number.isFinite(lower) || !Number.isFinite(upper) || lower >= upper || upper - lower > 3660 * 86400000) {
   throw new RangeError('Finite ordered range of at most 3660 days required');
@@ -187,7 +190,7 @@ export const getWebOccurrences = async (
  for (const row of rows) {
   const { recurrenceIntervalWeeks, recurrenceUntil, ...original } = row;
   if (recurrenceIntervalWeeks === null) {
-   if (row.start <= to.toISOString() && row.end >= from.toISOString()) events.push(original);
+   if (includeAllOneOffs || (row.start <= to.toISOString() && row.end >= from.toISOString())) events.push(original);
    continue;
   }
   try {
@@ -226,3 +229,10 @@ export const getWebEvent = async (id: string) => {
  const occurrence = result.events.find(event => event.id === id);
  return occurrence ? { ...series, ...occurrence, club: series.club } : undefined;
 };
+
+/** Raw anchors for subscription publication; never expand into duplicate VEVENTs. */
+export const getFeedSeries = async () => db.select({ ...eventSelect,
+ recurrenceIntervalWeeks: Events.recurrenceIntervalWeeks,
+ recurrenceUntil: Events.recurrenceUntil
+}).from(Events).leftJoin(Clubs, eq(Events.club, Clubs.id))
+ .where(isNotNull(Events.recurrenceIntervalWeeks));

@@ -1,7 +1,8 @@
-import { getAllEvents, pruneDeletedEvents } from '$lib/server/db/events';
+import { expandOccurrences } from '$lib/recurrence/expand.mjs';
+import { getAllEvents, getFeedSeries, pruneDeletedEvents } from '$lib/server/db/events';
 import type { RequestHandler } from '@sveltejs/kit';
 
-type CalendarEvent = Awaited<ReturnType<typeof getAllEvents>>[number];
+type CalendarEvent = Awaited<ReturnType<typeof getAllEvents>>[number] & { recurrenceIntervalWeeks?: number | null; recurrenceUntil?: string | null };
 
 const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
 let lastPruneAt = 0;
@@ -18,7 +19,14 @@ export const GET: RequestHandler = async ({ request }) => {
 	const rangeStart = new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000);
 	const rangeEnd = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000);
 
-	const events = await getAllEvents(rangeStart, rangeEnd, true);
+	const [raw, series] = await Promise.all([
+  getAllEvents(rangeStart, rangeEnd, true), getFeedSeries()
+ ]);
+ const ids = new Set(series.map(event => event.id));
+ const events: CalendarEvent[] = raw.filter(event => !ids.has(event.id));
+ for (const event of series) {
+  if (expandOccurrences(schedule(event), { from: +rangeStart, to: +rangeEnd }).length) events.push(event);
+ }
 
 	let lastModified = 0;
 	for (const e of events) {
@@ -30,7 +38,7 @@ export const GET: RequestHandler = async ({ request }) => {
 	lastModified = Math.floor(lastModified / 1000) * 1000;
 	const lastModifiedDate = new Date(lastModified);
 
-	const body = generateICal(lastModifiedDate, events);
+	const body = generateICal(lastModifiedDate, events, rangeStart, rangeEnd);
 	const etag = `"${await sha1Hex(body)}"`;
 
 	const ifNoneMatch = request.headers.get('if-none-match');
@@ -115,7 +123,14 @@ function formatDateTime(dateStr: string): string | null {
 	return `${year}${month}${day}T${hours}${minutes}${sec}`;
 }
 
-function generateICal(stamp: Date, events: CalendarEvent[]) {
+function schedule(event: CalendarEvent) {
+ return { seriesId: String(event.id), startDate: event.start.slice(0,10),
+ startTime: event.start.slice(11,16), endTime: event.end.slice(11,16),
+ endDayOffset: (Date.parse(event.end.slice(0,10)) - Date.parse(event.start.slice(0,10))) / 86400000,
+ recurrenceIntervalWeeks: event.recurrenceIntervalWeeks!, recurrenceUntil: event.recurrenceUntil ?? null };
+}
+
+function generateICal(stamp: Date, events: CalendarEvent[], rangeStart: Date, rangeEnd: Date) {
 	const lines = [
 		'BEGIN:VCALENDAR',
 		'VERSION:2.0',
@@ -168,7 +183,26 @@ function generateICal(stamp: Date, events: CalendarEvent[]) {
 			continue;
 		}
 
-		lines.push('BEGIN:VEVENT');
+		// Publication is bounded so explicit gap exclusions also cover invalid local ENDs.
+  const recurrence: string[] = [];
+  if (event.recurrenceIntervalWeeks) {
+   const spec = schedule(event);
+   const horizon = Math.min(+rangeEnd, spec.recurrenceUntil ? Date.parse(spec.recurrenceUntil + 'T23:59:59Z') : Infinity);
+   recurrence.push(`RRULE:FREQ=WEEKLY;INTERVAL=${event.recurrenceIntervalWeeks};UNTIL=${formatICalTimestamp(new Date(horizon))}`);
+   const step = event.recurrenceIntervalWeeks * 7 * 86400000;
+   const anchor = Date.parse(spec.startDate);
+   // Validate in bounded chunks, including historical slots in the master rule.
+   for (let lower = anchor - 2 * 86400000; lower <= horizon; lower += 365 * 86400000) {
+    const upper = Math.min(lower + 365 * 86400000, horizon + 2 * 86400000);
+    const valid = new Set(expandOccurrences(spec, {from: lower, to: upper + 2 * 86400000}).map(o => o.scheduledDate));
+    for (let day = anchor + Math.max(0, Math.ceil((lower-anchor)/step))*step; day < upper && day <= horizon; day += step) {
+     const date = new Date(day).toISOString().slice(0,10);
+     if (!valid.has(date)) recurrence.push(`EXDATE;TZID=Europe/Berlin:${date.replaceAll('-', '')}T${spec.startTime.replace(':','')}00`);
+    }
+   }
+  }
+  lines.push('BEGIN:VEVENT');
+  lines.push(...recurrence);
 		lines.push(`UID:${event.id}@cal72`);
 		const stampDate = event.deletedAt || event.updatedAt || event.createdAt;
 		lines.push(`DTSTAMP:${formatICalTimestamp(stampDate)}`);
