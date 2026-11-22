@@ -190,7 +190,18 @@ export const getWebOccurrences = async (
  for (const row of rows) {
   const { recurrenceIntervalWeeks, recurrenceUntil, ...original } = row;
   if (recurrenceIntervalWeeks === null) {
-   if (includeAllOneOffs || (row.start <= to.toISOString() && row.end >= from.toISOString())) events.push(original);
+   if (includeAllOneOffs) events.push(original);
+   else {
+    // Resolve stored Berlin wall times only for filtering; keep the original payload.
+    const startDate = row.start.slice(0, 10);
+    const endDayOffset = (Date.parse(row.end.slice(0, 10)) - Date.parse(startDate)) / 86400000;
+    const matches = expandOccurrences({
+     seriesId: String(row.id), startDate, startTime: row.start.slice(11, 16),
+     endTime: row.end.slice(11, 16), endDayOffset,
+     recurrenceIntervalWeeks: 1, recurrenceUntil: startDate
+    }, { from: lower - 1, to: upper + 1 });
+    if (matches.length) events.push(original);
+   }
    continue;
   }
   try {

@@ -198,7 +198,7 @@ function generateICal(stamp: Date, events: CalendarEvent[], rangeStart: Date, ra
    // Validate in bounded chunks, including historical slots in the master rule.
    for (let lower = anchor - 2 * 86400000; lower <= horizon; lower += 365 * 86400000) {
     const upper = Math.min(lower + 365 * 86400000, horizon + 2 * 86400000);
-    const valid = new Set(expandOccurrences(spec, {from: lower, to: upper + 2 * 86400000}).map(o => o.scheduledDate));
+    const valid = new Set(expandOccurrences(spec, {from: lower - 2 * 86400000, to: upper + 2 * 86400000}).map(o => o.scheduledDate));
     for (let day = anchor + Math.max(0, Math.ceil((lower-anchor)/step))*step; day < upper && day <= horizon; day += step) {
      const date = new Date(day).toISOString().slice(0,10);
      if (!valid.has(date)) recurrence.push(`EXDATE;TZID=Europe/Berlin:${date.replaceAll('-', '')}T${spec.startTime.replace(':','')}00`);

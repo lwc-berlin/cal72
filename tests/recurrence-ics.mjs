@@ -106,3 +106,23 @@ test('autumn duration correction uses first ambiguous start and no redundant ove
  assert.equal(correction.getFirstPropertyValue('dtend').toString(),'2026-10-25T02:30:00Z');
  assert.equal(correction.hasProperty('rrule'),false);
 });
+
+test('chunk boundary retains an already-ended valid Berlin slot', async () => {
+ const response = await probe('2026-01-01Z', [{...fixture, start:'2024-01-07T00:15', end:'2024-01-07T00:45', recurrenceIntervalWeeks:1, recurrenceUntil:null}]);
+ assert.equal(response.status,200);
+ assert.doesNotMatch(response.body,/EXDATE;TZID=Europe\/Berlin:20260104T001500/);
+});
+test('explicit window compares one-off Berlin instants without rewriting storage', async () => {
+ const text = readFileSync('src/lib/server/db/events.ts','utf8');
+ const begin = text.indexOf('export const getWebOccurrences =');
+ const end = text.indexOf('/** Resolve only', begin);
+ const row = {...fixture,start:'2026-07-02T23:00',end:'2026-07-02T23:30',recurrenceIntervalWeeks:null};
+ const chain = {from(){return this;},leftJoin(){return this;},where(){return Promise.resolve([row]);}};
+ const ctx = vm.createContext({db:{select:()=>chain},eventSelect:{},Events:{},Clubs:{},eq:()=>null,isNull:()=>null,expandOccurrences});
+ vm.runInContext(ts.transpile(text.slice(begin,end).replace('export const','const'),{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None})+'\nglobalThis.list=getWebOccurrences;',ctx);
+ const result = await ctx.list(new Date('2026-07-02T20:00Z'),new Date('2026-07-02T22:00Z'));
+ assert.equal(result.events.length,1);
+ assert.equal(result.events[0].start,row.start);
+ assert.equal(result.events[0].end,row.end);
+ assert.equal((await ctx.list(new Date('2026-07-02T22:00Z'),new Date('2026-07-03T00:00Z'))).events.length,0);
+});
