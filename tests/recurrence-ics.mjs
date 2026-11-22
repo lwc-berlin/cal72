@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
-import { execFileSync } from 'node:child_process';
+import { webcrypto } from 'node:crypto';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import ts from 'typescript';
@@ -27,10 +27,7 @@ test('nonexistent END is explicitly excluded', () => {
 });
 test('one-off serializer is byte-identical to baseline', () => {
  const event = { ...fixture, recurrenceIntervalWeeks: null };
- const baseline = execFileSync('git', ['show','2db9ceb78c8ffa42532be406b705bf7cd387dfd5:src/routes/calendar/+server.ts'], {encoding:'utf8'}).replace(/^import .*;\n/gm,'').replace('export const GET','const GET');
- const original = vm.createContext({ TextEncoder, console });
- vm.runInContext(ts.transpile(baseline,{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None})+'\nglobalThis.serialize=generateICal;',original);
- assert.equal(serialize(event),original.serialize(new Date('2026-01-01Z'),[event]));
+ assert.equal(serialize(event), readFileSync('tests/recurrence-ics.fixture', 'utf8'));
 });
 test('default listing preserves distant one-offs; explicit windows filter them', async () => {
  const text = readFileSync('src/lib/server/db/events.ts','utf8');
@@ -42,4 +39,42 @@ test('default listing preserves distant one-offs; explicit windows filter them',
  vm.runInContext(ts.transpile(text.slice(begin,end).replace('export const','const'),{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None})+'\nglobalThis.list=getWebOccurrences;',ctx);
  assert.equal((await ctx.list()).events.length,1);
  assert.equal((await ctx.list(new Date('2026-01-01Z'),new Date('2026-02-01Z'))).events.length,0);
+});
+async function probe(now, rows, headers = {}) {
+ class Clock extends Date { constructor(...args) { super(...(args.length ? args : [now])); } }
+ const ctx = vm.createContext({ TextEncoder, console, expandOccurrences, Date: Clock, Response, crypto: webcrypto,
+  getAllEvents: async () => rows.filter(e => !e.recurrenceIntervalWeeks), getFeedSeries: async () => rows.filter(e => e.recurrenceIntervalWeeks), pruneDeletedEvents: async () => {} });
+ vm.runInContext(ts.transpile(source.replace('export const GET','const GET'), {target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None})+'\nglobalThis.handler=GET;',ctx);
+ const response = await ctx.handler({request:new Request('https://example.test/calendar',{headers})});
+ return {status:response.status, body:await response.text(), headers:Object.fromEntries(response.headers)};
+}
+test('public unlimited rule and conditional refresh track rolling gap exclusions', async () => {
+ const row = {...fixture, recurrenceUntil:null, start:'2026-03-15T01:30',end:'2026-03-15T02:30'};
+ const first = await probe('2026-01-01Z',[row]);
+ assert.equal(first.status,200);
+ assert.match(first.body,/RRULE:FREQ=WEEKLY;INTERVAL=2\r\n/);
+ const later = await probe('2027-04-01Z',[row],{'if-modified-since':first.headers['last-modified']});
+ assert.equal(later.status,200);
+ assert.notEqual(later.body,first.body);
+ assert.notEqual(later.headers.etag,first.headers.etag);
+ assert.equal(later.headers['last-modified'],first.headers['last-modified']);
+ assert.equal(later.headers['content-type'],'text/calendar; charset=utf-8');
+ const cached = await probe('2027-04-01Z',[row],{'if-none-match':later.headers.etag});
+ assert.deepEqual(cached,{status:304,body:'',headers:{etag:later.headers.etag,'last-modified':later.headers['last-modified']}});
+});
+test('public one-off fixture and timestamp caching stay unchanged', async () => {
+ const row = {...fixture,recurrenceIntervalWeeks:null};
+ const first = await probe('2026-01-01Z',[row]);
+ assert.equal(first.status,200); assert.equal(first.body,readFileSync('tests/recurrence-ics.fixture','utf8'));
+ const cached = await probe('2027-04-01Z',[row],{'if-modified-since':first.headers['last-modified']});
+ assert.deepEqual(cached,{status:304,body:'',headers:{etag:first.headers.etag,'last-modified':first.headers['last-modified']}});
+});
+
+test('public timestamp-only refresh cannot conceal a changed rolling body', async () => {
+ const row = {...fixture,recurrenceUntil:null,start:'2026-03-15T01:30',end:'2026-03-15T02:30'};
+ const first = await probe('2026-01-01Z',[row]);
+ const later = await probe('2027-04-01Z',[row],{'if-modified-since':first.headers['last-modified']});
+ assert.equal(later.status,200);
+ assert.match(first.body,/EXDATE;TZID=Europe\/Berlin:20260329T013000/);
+ assert.match(later.body,/EXDATE;TZID=Europe\/Berlin:20280326T013000/);
 });

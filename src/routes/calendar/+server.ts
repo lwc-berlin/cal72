@@ -49,7 +49,7 @@ export const GET: RequestHandler = async ({ request }) => {
 		});
 	}
 	const ifModifiedSince = request.headers.get('if-modified-since');
-	if (ifModifiedSince && new Date(ifModifiedSince).getTime() >= lastModified) {
+	if (!series.length && !ifNoneMatch && ifModifiedSince && new Date(ifModifiedSince).getTime() >= lastModified) {
 		return new Response(null, {
 			status: 304,
 			headers: { ETag: etag, 'Last-Modified': lastModifiedDate.toUTCString() }
@@ -183,12 +183,13 @@ function generateICal(stamp: Date, events: CalendarEvent[], rangeStart: Date, ra
 			continue;
 		}
 
-		// Publication is bounded so explicit gap exclusions also cover invalid local ENDs.
+		// EXDATE validation is bounded. Unlimited rules can still contain invalid ENDs
+  // beyond this rolling horizon; subscriber acceptance remains unproven.
   const recurrence: string[] = [];
   if (event.recurrenceIntervalWeeks) {
    const spec = schedule(event);
-   const horizon = Math.min(+rangeEnd, spec.recurrenceUntil ? Date.parse(spec.recurrenceUntil + 'T23:59:59Z') : Infinity);
-   recurrence.push(`RRULE:FREQ=WEEKLY;INTERVAL=${event.recurrenceIntervalWeeks};UNTIL=${formatICalTimestamp(new Date(horizon))}`);
+   const horizon = spec.recurrenceUntil ? Date.parse(spec.recurrenceUntil + 'T23:59:59Z') : +rangeEnd;
+   recurrence.push(`RRULE:FREQ=WEEKLY;INTERVAL=${event.recurrenceIntervalWeeks}${spec.recurrenceUntil ? ';UNTIL=' + formatICalTimestamp(new Date(spec.recurrenceUntil + 'T23:59:59Z')) : ''}`);
    const step = event.recurrenceIntervalWeeks * 7 * 86400000;
    const anchor = Date.parse(spec.startDate);
    // Validate in bounded chunks, including historical slots in the master rule.
