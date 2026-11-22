@@ -5,6 +5,9 @@
 
 	let { data }: { data: PageData } = $props();
 
+	let occurrenceIssues = $state(data.occurrenceIssues);
+	let loadError = $state('');
+
 	let currentView = $state('dayGridMonth');
 	let calendarDate = $state(new Date());
 
@@ -17,11 +20,21 @@
 		date: calendarDate,
 		dayMaxEvents: true,
 		moreLinkContent: (arg: any) => `+${arg.num}`,
-		events: data.events.map((event: any) => ({
-			...event,
-			backgroundColor: event.club?.color || undefined,
-			textColor: 'black'
-		})),
+		eventSources: [{ events: async (range: { start: Date; end: Date }) => {
+            try {
+                const query = new URLSearchParams({ start: range.start.toISOString(), end: range.end.toISOString() });
+                const response = await fetch(`/api/occurrences?${query}`);
+                if (!response.ok) throw new Error('Could not load the requested calendar range.');
+                const result = await response.json();
+                occurrenceIssues = result.issues;
+                loadError = '';
+                return result.events.map((event: any) => ({ ...event,
+                    backgroundColor: event.club?.color || undefined, textColor: 'black' }));
+            } catch (error) {
+                loadError = 'Could not load the requested calendar range. This view may be incomplete.';
+                throw error;
+            }
+        } }],
 		firstDay: 1,
 		dateClick: (info: any) => {
 			console.log(`Clicked on date: ${JSON.stringify(info.date)}`);
@@ -46,18 +59,13 @@
 
 <main class="calendar">
 
-	<p role="note">
-		Recurring occurrences are loaded only within 366 days before and after page load.
-		Dates outside this range may have recurring events that are not shown.
-		Calendar navigation does not load additional occurrences.
-		One-off events are not limited by this recurrence range.
-	</p>
-	{#if data.occurrenceIssues.length > 0}
+	{#if loadError}<p role="alert">{loadError}</p>{/if}
+	{#if occurrenceIssues.length > 0}
 		<section role="status" aria-label="Recurring event display issues">
 			<h2>Some recurring events could not be displayed</h2>
 			<p>This view may be incomplete. Other available occurrences remain shown.</p>
 			<ul>
-				{#each data.occurrenceIssues as issue}
+				{#each occurrenceIssues as issue}
 					<li>Series {issue.seriesId}: {issue.message}</li>
 				{/each}
 			</ul>
