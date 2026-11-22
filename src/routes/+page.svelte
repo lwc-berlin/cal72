@@ -35,7 +35,7 @@
 		},
 		eventClick: (info: any) => {
 			console.log('Event clicked', info.event);
-			goto(`/events/${info?.event?.id}`);
+			goto(`/events/${encodeURIComponent(String(info.event.id))}`);
 		}
 	});
 
@@ -45,6 +45,25 @@
 </script>
 
 <main class="calendar">
+
+	<p role="note">
+		Recurring occurrences are loaded only within 366 days before and after page load.
+		Dates outside this range may have recurring events that are not shown.
+		Calendar navigation does not load additional occurrences.
+		One-off events are not limited by this recurrence range.
+	</p>
+	{#if data.occurrenceIssues.length > 0}
+		<section role="status" aria-label="Recurring event display issues">
+			<h2>Some recurring events could not be displayed</h2>
+			<p>This view may be incomplete. Other available occurrences remain shown.</p>
+			<ul>
+				{#each data.occurrenceIssues as issue}
+					<li>Series {issue.seriesId}: {issue.message}</li>
+				{/each}
+			</ul>
+		</section>
+	{/if}
+
 	<div class="viewcontroll">
 		<button class:active={currentView === 'dayGridMonth'} onclick={() => setView('dayGridMonth')}>
 			Month

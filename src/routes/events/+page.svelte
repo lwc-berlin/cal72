@@ -40,6 +40,24 @@
 <main class="event-list">
 	<h1>Events</h1>
 
+	<p role="note">
+		Recurring occurrences are loaded only within 366 days before and after page load.
+		Dates outside this range may have recurring events that are not shown.
+		One-off events are not limited by this recurrence range.
+	</p>
+	{#if data.occurrenceIssues.length > 0}
+		<section role="status" aria-label="Recurring event display issues">
+			<h2>Some recurring events could not be displayed</h2>
+			<p>This view may be incomplete. Other available occurrences remain shown.</p>
+			<ul>
+				{#each data.occurrenceIssues as issue}
+					<li>Series {issue.seriesId}: {issue.message}</li>
+				{/each}
+			</ul>
+		</section>
+	{/if}
+
+
 	<h2>Future Events</h2>
 	{#each data.futureEvents as event}
 		{@render eventCard(event)}
