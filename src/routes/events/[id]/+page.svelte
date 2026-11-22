@@ -28,6 +28,7 @@
 
 	<p class="event-details__description">{data.event?.description}</p>
 
+	{#if data.canMutate}
 	<div class="event-details__actions">
 		<a class="button" href={`/events/${data.event?.id}/edit`}>Edit</a>
 		<ConfirmationButton message="Are you sure you want to delete this event?" action="?/delete">
@@ -35,5 +36,6 @@
 		</ConfirmationButton>
 	</div>
 
+	{/if}
 	<a href="/events">Back to all events</a>
 </main>

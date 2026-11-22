@@ -4,7 +4,7 @@
 	import { formatEventTimespan } from '$lib/utils/dateFormat';
 
 	interface EventItem {
-		id: number;
+		id: number | string;
 		title: string;
 		start: string;
 		end: string;
@@ -18,15 +18,15 @@
 	<article
 		class="event-list__item"
 		tabindex="-1"
-		onclick={() => goto(`/events/${event.id}`)}
+		onclick={() => goto(`/events/${encodeURIComponent(String(event.id))}`)}
 		onkeydown={(e) => {
 			if (e.key === 'Enter' || e.key === ' ') {
-				goto(`/events/${event.id}`);
+				goto(`/events/${encodeURIComponent(String(event.id))}`);
 			}
 		}}
 	>
 		<div class="event-list__item__header">
-			<h2><a href={`/events/${event.id}`}>{event.title}</a></h2>
+			<h2><a href={`/events/${encodeURIComponent(String(event.id))}`}>{event.title}</a></h2>
 			{#if event.club}
 				<div class="event-list__club tag" style:border-color={event.club.color}>
 					{event.club.name}

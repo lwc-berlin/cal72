@@ -70,6 +70,7 @@ export const getPastEvents = async () => {
 
 export const getEvent = async (id: string) => {
 	console.log(`Fetching event with id: ${id}`);
+	if (!/^[1-9]\d*$/.test(id) || !Number.isSafeInteger(Number(id))) return undefined;
 	const events = await db
 		.select()
 		.from(Events)
@@ -122,6 +123,8 @@ export const deleteClub = async (id: number) => {
 };
 
 export const updateEvent = async (data: UpdateEvent) => {
+	const existing = await getEvent(data.id);
+	if (!existing || existing.recurrenceIntervalWeeks !== null) throw new Error("Unsupported recurring mutation or invalid id");
 	const result = await db
 		.update(Events)
 		.set({
@@ -132,19 +135,20 @@ export const updateEvent = async (data: UpdateEvent) => {
 			club: data.club,
 			sequence: sql`${Events.sequence} + 1`
 		})
-		.where(eq(Events.id, parseInt(data.id)))
+		.where(and(eq(Events.id, Number(data.id)), isNull(Events.recurrenceIntervalWeeks)))
 		.returning();
 	return result[0];
 };
 
 export const deleteEvent = async (id: number) => {
+	if (!Number.isSafeInteger(id) || id < 1) throw new Error("Invalid event id");
 	const result = await db
 		.update(Events)
 		.set({
 			deletedAt: new Date(),
 			sequence: sql`${Events.sequence} + 1`
 		})
-		.where(eq(Events.id, id))
+		.where(and(eq(Events.id, id), isNull(Events.recurrenceIntervalWeeks)))
 		.returning();
 	return result[0];
 };
@@ -204,4 +208,21 @@ export const getWebOccurrences = async (
  }
  events.sort((a, b) => a.start.localeCompare(b.start));
  return { events, issues };
+};
+
+/** Resolve only canonical scheduled-slot tuples, never numeric prefixes. */
+export const getWebEvent = async (id: string) => {
+ if (/^[1-9]\d*$/.test(id)) return getEvent(id);
+ let tuple: unknown;
+ try { tuple = JSON.parse(id); } catch { return undefined; }
+ if (!Array.isArray(tuple) || tuple.length !== 2 || JSON.stringify(tuple) !== id ||
+  typeof tuple[0] !== 'string' || !/^[1-9]\d*$/.test(tuple[0]) ||
+  typeof tuple[1] !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(tuple[1])) return undefined;
+ const series = await getEvent(tuple[0]);
+ if (!series || series.deletedAt || series.recurrenceIntervalWeeks === null) return undefined;
+ const day = Date.parse(tuple[1].slice(0, 10) + 'T00:00:00Z');
+ if (!Number.isFinite(day)) return undefined;
+ const result = await getWebOccurrences(new Date(day - 367 * 86400000), new Date(day + 367 * 86400000));
+ const occurrence = result.events.find(event => event.id === id);
+ return occurrence ? { ...series, ...occurrence, club: series.club } : undefined;
 };

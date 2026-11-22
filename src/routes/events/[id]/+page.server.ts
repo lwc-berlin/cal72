@@ -1,9 +1,9 @@
-import { deleteEvent, getEvent, getClub } from '$lib/server/db/events';
+import { deleteEvent, getWebEvent, getClub } from '$lib/server/db/events';
 import type { Actions, PageServerLoad } from './$types';
 import { fail, redirect } from '@sveltejs/kit';
 
 export const load: PageServerLoad = async ({ params }) => {
-	const event = await getEvent(params.id);
+	const event = await getWebEvent(params.id);
 	let club = null;
 
 	if (event?.club) {
@@ -12,14 +12,18 @@ export const load: PageServerLoad = async ({ params }) => {
 
 	return {
 		event,
-		club
+		club,
+		canMutate: !!event && event.recurrenceIntervalWeeks === null
 	};
 };
 
 export const actions: Actions = {
 	delete: async ({ params }) => {
 		try {
-			await deleteEvent(parseInt(params.id));
+			if (!/^[1-9]\d*$/.test(params.id)) return fail(400, { success: false, message: "Unsupported occurrence mutation" });
+			const event = await getWebEvent(params.id);
+			if (!event || event.recurrenceIntervalWeeks !== null) return fail(400, { success: false, message: "Unsupported recurring mutation" });
+			await deleteEvent(Number(params.id));
 			console.log(`Event ${params.id} deleted`);
 		} catch (error) {
 			console.error(`Error deleting Event ${params.id}`);

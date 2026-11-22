@@ -1,10 +1,12 @@
 import { getEvent, updateEvent, getAllClubs } from '$lib/server/db/events';
-import { fail } from '@sveltejs/kit';
+import { error, fail } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ params }) => {
+	const event = await getEvent(params.id);
+	if (!event || event.recurrenceIntervalWeeks !== null) error(400, "Unsupported recurring edit or invalid id");
 	return {
-		event: await getEvent(params.id),
+		event,
 		clubs: await getAllClubs()
 	};
 };
