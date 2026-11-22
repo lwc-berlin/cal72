@@ -50,7 +50,7 @@ test('old anchor is discoverable in a finite later range and recurring mutations
   const edit = await request.get(path + '/edit');
   expect(edit.status()).toBe(400);
   expect(await edit.text()).toContain('Unsupported recurring edit or invalid id');
-  const deletion = await request.post(path + '?/delete');
+  const deletion = await request.post(path + '?/delete', { form: {} });
   expect(deletion.status()).toBe(400);
   expect(await deletion.text()).toContain(id === before[0].id ? 'Unsupported occurrence mutation' : 'Unsupported recurring mutation');
   const update = await request.post(path + '/edit', { form: { title: title + ' forbidden', start: '2026-07-01T19:00', end: '2026-07-01T20:00', description: '', club: '' } });
@@ -116,7 +116,14 @@ test('one-off edit and delete preserve public listing and subscription behavior'
 	await page.getByRole('button', { name: 'Delete Event', exact: true }).click();
 	await expect(page).toHaveURL(/\/events$/);
 	await expect(page.getByRole('link', { name: edited, exact: true })).toHaveCount(0);
-	expect((await readFeed()).filter(event => event.getFirstPropertyValue('uid') === uid)).toHaveLength(0);
+	// Subscription deletion is a stable-UID cancellation, not feed removal.
+	const cancelled = (await readFeed()).filter(event => event.getFirstPropertyValue('uid') === uid);
+	expect(cancelled).toHaveLength(1);
+	expect(cancelled[0].getFirstPropertyValue('status')).toBe('CANCELLED');
+	expect(cancelled[0].getFirstPropertyValue('summary')).toBe(edited);
+	expect(Number(cancelled[0].getFirstPropertyValue('sequence')))
+		.toBeGreaterThan(Number(after[0].getFirstPropertyValue('sequence')));
+	expect(cancelled[0].getFirstPropertyValue('last-modified')).not.toBeNull();
 	const deleted = await request.get(detailUrl);
 	expect(deleted.status()).toBe(404);
 });

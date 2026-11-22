@@ -142,10 +142,17 @@ for (const [interval, until] of [
 		const first = iterator.next()!;
 		expect(first.toString()).toBe('2026-07-01T19:00:00');
 		const second = iterator.next();
-		if (interval === '2') expect(second).toBeNull();
+		// RecurExpansion returns undefined at exhaustion; complete documents termination.
+		if (interval === '2') {
+			expect(second).toBeUndefined();
+			expect(iterator.complete).toBe(true);
+		}
 		else expect(second!.toString()).toBe(interval === '1'
 			? '2026-07-08T19:00:00' : '2026-07-22T19:00:00');
-		if (interval === '3') expect(iterator.next()).toBeNull();
+		if (interval === '3') {
+			expect(iterator.next()).toBeUndefined();
+			expect(iterator.complete).toBe(true);
+		}
 		const refreshed = await request.get('/calendar');
 		expect(refreshed.status()).toBe(200);
 		const same = new ICAL.Component(ICAL.parse(await refreshed.text()))
