@@ -107,9 +107,19 @@ for (const [interval, until] of [
 		if (until) await expect(cards).toHaveCount(interval === '2' ? 1 : 2);
 		const eventLink = anchor.getByRole('link', { name: title, exact: true });
 		await expect(eventLink).toHaveAttribute('href', /2026-07-01T19%3A00/);
+		const occurrenceHref = await eventLink.getAttribute('href');
+		expect(occurrenceHref).not.toBeNull();
+		const occurrenceUrl = new URL(occurrenceHref!, page.url()).href;
 		await eventLink.click();
-		await expect(page.getByRole('heading', { name: title, exact: true })).toBeVisible();
-		await expect(page.locator('time')).toHaveAttribute('datetime', '2026-07-01T19:00');
+		await expect(page).toHaveURL(occurrenceUrl);
+		const detailHeading = page.getByRole('heading', { level: 1, name: title, exact: true });
+		await expect(detailHeading).toBeVisible();
+		const detail = page.getByRole('main').filter({ has: detailHeading });
+		await expect(detail).toHaveCount(1);
+		const scheduledStart = detail.locator('time');
+		await expect(scheduledStart).toHaveCount(1);
+		// The detail payload serializes the 19:00 Berlin scheduled start as UTC.
+		await expect(scheduledStart).toHaveAttribute('datetime', '2026-07-01T17:00:00.000Z');
 		// Pending: parsed recurrence ICS, expansion, inclusive end, and overnight end semantics.
 	});
 }
