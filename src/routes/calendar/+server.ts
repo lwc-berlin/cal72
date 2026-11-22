@@ -186,9 +186,12 @@ function generateICal(stamp: Date, events: CalendarEvent[], rangeStart: Date, ra
 		// EXDATE validation is bounded. Unlimited rules can still contain invalid ENDs
   // beyond this rolling horizon; subscriber acceptance remains unproven.
   const recurrence: string[] = [];
+  const corrections: { scheduledDate: string; start: number; end: number }[] = [];
   if (event.recurrenceIntervalWeeks) {
    const spec = schedule(event);
-   const horizon = spec.recurrenceUntil ? Date.parse(spec.recurrenceUntil + 'T23:59:59Z') : +rangeEnd;
+   const horizon = Math.min(spec.recurrenceUntil ? Date.parse(spec.recurrenceUntil + 'T23:59:59Z') : Infinity, +rangeEnd);
+   const master = expandOccurrences(spec, {from: Date.parse(spec.startDate) - 2 * 86400000, to: Date.parse(spec.startDate) + 369 * 86400000}).find(o => o.scheduledDate === spec.startDate);
+   const masterDuration = master ? master.end - master.start : null;
    recurrence.push(`RRULE:FREQ=WEEKLY;INTERVAL=${event.recurrenceIntervalWeeks}${spec.recurrenceUntil ? ';UNTIL=' + formatICalTimestamp(new Date(spec.recurrenceUntil + 'T23:59:59Z')) : ''}`);
    const step = event.recurrenceIntervalWeeks * 7 * 86400000;
    const anchor = Date.parse(spec.startDate);
@@ -201,7 +204,12 @@ function generateICal(stamp: Date, events: CalendarEvent[], rangeStart: Date, ra
      if (!valid.has(date)) recurrence.push(`EXDATE;TZID=Europe/Berlin:${date.replaceAll('-', '')}T${spec.startTime.replace(':','')}00`);
     }
    }
+   if (masterDuration !== null) {
+    corrections.push(...expandOccurrences(spec, {from: +rangeStart, to: +rangeEnd})
+     .filter(o => o.end - o.start !== masterDuration));
+   }
   }
+  const masterLineStart = lines.length;
   lines.push('BEGIN:VEVENT');
   lines.push(...recurrence);
 		lines.push(`UID:${event.id}@cal72`);
@@ -221,6 +229,15 @@ function generateICal(stamp: Date, events: CalendarEvent[], rangeStart: Date, ra
 		);
 		lines.push(`DESCRIPTION:${escapeICalText(event.description)}`);
 		lines.push('END:VEVENT');
+  const masterLines = lines.slice(masterLineStart);
+  for (const occurrence of corrections) {
+   // Same UID/sequence and original local start identify this recurrence instance.
+   lines.push(...masterLines.filter(line => !line.startsWith('RRULE:') && !line.startsWith('EXDATE;') && !line.startsWith('DTSTART;') && !line.startsWith('DTEND;') && line !== 'END:VEVENT'));
+   lines.push(`RECURRENCE-ID;TZID=Europe/Berlin:${occurrence.scheduledDate.replaceAll('-', '')}T${event.start.slice(11,16).replace(':','')}00`);
+   lines.push(`DTSTART:${formatICalTimestamp(new Date(occurrence.start))}`);
+   lines.push(`DTEND:${formatICalTimestamp(new Date(occurrence.end))}`);
+   lines.push('END:VEVENT');
+  }
 	}
 
 	lines.push('END:VCALENDAR');

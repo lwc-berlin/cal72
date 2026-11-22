@@ -78,3 +78,31 @@ test('public timestamp-only refresh cannot conceal a changed rolling body', asyn
  assert.match(first.body,/EXDATE;TZID=Europe\/Berlin:20260329T013000/);
  assert.match(later.body,/EXDATE;TZID=Europe\/Berlin:20280326T013000/);
 });
+
+test('public feed corrects elapsed duration at spring transition with stable identity', async () => {
+ const row = {...fixture, recurrenceIntervalWeeks:1, recurrenceUntil:null, start:'2026-03-15T01:30', end:'2026-03-15T03:30'};
+ const response = await probe('2026-03-01Z',[row]);
+ const calendar = new ICAL.Component(ICAL.parse(response.body));
+ ICAL.TimezoneService.register(new ICAL.Timezone(calendar.getFirstSubcomponent('vtimezone')));
+ const components = calendar.getAllSubcomponents('vevent');
+ const override = components.find(c => c.getFirstPropertyValue('recurrence-id')?.toString() === '2026-03-29T01:30:00');
+ assert.ok(override, 'transition occurrence needs an explicit end correction');
+ assert.equal(override.getFirstPropertyValue('uid'),'42@cal72');
+ assert.equal(override.getFirstPropertyValue('sequence'),3);
+ const master = new ICAL.Event(components[0]);
+ master.relateException(new ICAL.Event(override));
+ const details = master.getOccurrenceDetails(ICAL.Time.fromString('2026-03-29T01:30:00'));
+ assert.equal(details.endDate.toUnixTime(),Date.parse('2026-03-29T01:30:00Z') / 1000);
+ assert.equal(override.getFirstPropertyValue('dtend').toUnixTime()-override.getFirstPropertyValue('dtstart').toUnixTime(),3600);
+});
+
+test('autumn duration correction uses first ambiguous start and no redundant overrides', async () => {
+ const response = await probe('2026-10-01Z',[{...fixture, start:'2026-10-11T02:30',end:'2026-10-11T03:30',recurrenceIntervalWeeks:1,recurrenceUntil:'2026-11-01'}]);
+ const components = new ICAL.Component(ICAL.parse(response.body)).getAllSubcomponents('vevent');
+ assert.equal(components.length,2);
+ const correction = components[1];
+ assert.equal(correction.getFirstPropertyValue('recurrence-id').toString(),'2026-10-25T02:30:00');
+ assert.equal(correction.getFirstPropertyValue('dtstart').toString(),'2026-10-25T00:30:00Z');
+ assert.equal(correction.getFirstPropertyValue('dtend').toString(),'2026-10-25T02:30:00Z');
+ assert.equal(correction.hasProperty('rrule'),false);
+});
