@@ -2,6 +2,7 @@
 	import type { PageProps } from './$types';
 	import ConfirmationButton from '$lib/components/ConfirmationButton.svelte';
 	import { formatEventTimespan } from '$lib/utils/dateFormat';
+	import { resolve } from '$app/paths';
 
 	let { data }: PageProps = $props();
 
@@ -31,7 +32,7 @@
 	{#if data.canMutate}
 	<div class="event-details__actions">
 		{#if data.isOccurrence}
-			<a class="button" href={`/events/${encodeURIComponent(String(data.event?.id))}/edit`}>Edit this occurrence</a>
+			<a class="button" href={resolve('/events/[id]/edit', { id: String(data.event?.id) })}>Edit this occurrence</a>
 			<ConfirmationButton
 				message="Delete only this occurrence? The other occurrences of the series are kept."
 				action="?/delete"
