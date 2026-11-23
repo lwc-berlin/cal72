@@ -55,3 +55,27 @@ export function expandOccurrences(schedule, {from, to}) {
  }
  return result;
 }
+
+/** Resolve a stored Berlin local `YYYY-MM-DDTHH:mm` to epoch milliseconds.
+ * Returns undefined when that local time does not exist (spring-forward gap);
+ * an ambiguous autumn time resolves to its first instance, as for occurrences.
+ */
+export function localToInstant(value) {
+ if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) throw new RangeError('Expected YYYY-MM-DDTHH:mm');
+ return resolve(date(value.slice(0,10)) + time(value.slice(11)));
+}
+
+/** Berlin local start and end text an occurrence has before any exception applies. */
+export function scheduledLocal(schedule, scheduledDate) {
+ const day = date(scheduledDate);
+ return {
+  start: scheduledDate + 'T' + schedule.startTime,
+  end: new Date(day + schedule.endDayOffset * DAY).toISOString().slice(0,10) + 'T' + schedule.endTime
+ };
+}
+
+/** True when `scheduledDate` is a slot that the series actually produces. */
+export function hasScheduledSlot(schedule, scheduledDate) {
+ const day = date(scheduledDate);
+ return expandOccurrences(schedule, { from: day - 2 * DAY, to: day + 3 * DAY }).some(o => o.scheduledDate === scheduledDate);
+}

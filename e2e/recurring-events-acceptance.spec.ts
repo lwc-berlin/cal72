@@ -41,7 +41,8 @@ test('old anchor is discoverable in a finite later range and recurring mutations
  const from = '2026-07-01T00:00:00.000Z', to = '2026-07-09T00:00:00.000Z';
  const before = await occurrences(request, title, from, to);
  expect(before.map((row: { start: string }) => row.start)).toEqual(['2026-07-01T17:00:00.000Z', '2026-07-08T17:00:00.000Z']);
- for (const id of [before[0].id, String(before[0].seriesId)]) {
+ // Occurrence ids are individually editable (see occurrence-exceptions.spec.ts); a bare series id stays closed until series-level scopes exist.
+ for (const id of [String(before[0].seriesId)]) {
   const path = '/events/' + encodeURIComponent(id);
   await page.goto(path);
   await expect(page.getByRole('heading', { level: 1, name: title, exact: true })).toBeVisible();
@@ -52,7 +53,7 @@ test('old anchor is discoverable in a finite later range and recurring mutations
   expect(await edit.text()).toContain('Unsupported recurring edit or invalid id');
   const deletion = await request.post(path + '?/delete', { headers: { Accept: 'text/html' }, form: {} });
   expect(deletion.status()).toBe(400);
-  expect(await deletion.text()).toContain(id === before[0].id ? 'Unsupported occurrence mutation' : 'Unsupported recurring mutation');
+  expect(await deletion.text()).toContain('Unsupported recurring mutation');
   const update = await request.post(path + '/edit', { headers: { Accept: 'text/html' }, form: { title: title + ' forbidden', start: '2026-07-01T19:00', end: '2026-07-01T20:00', description: '', club: '' } });
   expect(update.status()).toBe(400);
   expect(await update.text()).toContain('Unsupported recurring edit or invalid id');
