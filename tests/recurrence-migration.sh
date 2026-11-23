@@ -61,4 +61,38 @@ BEGIN
  END IF;
 END $$;
 SQL
+# Ticket 02: the exceptions migration is purely additive over populated data.
+psql <<'SQL'
+CREATE TABLE before_exceptions AS SELECT to_jsonb(events) AS row FROM events;
+SQL
+psql < drizzle/0004_occurrence_exceptions.sql
+psql <<'SQL'
+DO $$
+BEGIN
+ IF EXISTS (
+   SELECT 1 FROM events e JOIN before_exceptions b ON (b.row->>'id')::integer = e.id WHERE to_jsonb(e) <> b.row
+ ) OR (SELECT count(*) FROM events) <> (SELECT count(*) FROM before_exceptions) THEN
+   RAISE EXCEPTION 'Exceptions migration changed existing events';
+ END IF;
+ INSERT INTO event_exceptions (series_id, scheduled_date, title) VALUES (1, '2026-07-08', 'Special');
+ IF NOT EXISTS (SELECT 1 FROM event_exceptions WHERE deleted = false AND club_overridden = false AND sequence = 1 AND description IS NULL) THEN
+   RAISE EXCEPTION 'Exception defaults must inherit every other field';
+ END IF;
+ BEGIN
+   INSERT INTO event_exceptions (series_id, scheduled_date, deleted) VALUES (1, '2026-07-08', true);
+   RAISE EXCEPTION 'Duplicate slot accepted';
+ EXCEPTION WHEN unique_violation THEN NULL;
+ END;
+ BEGIN
+   INSERT INTO event_exceptions (series_id, scheduled_date) VALUES (9999, '2026-07-08');
+   RAISE EXCEPTION 'Exception for a missing series accepted';
+ EXCEPTION WHEN foreign_key_violation THEN NULL;
+ END;
+ DELETE FROM events WHERE id = 1;
+ IF EXISTS (SELECT 1 FROM event_exceptions) THEN
+   RAISE EXCEPTION 'Exceptions must follow their series';
+ END IF;
+END $$;
+SQL
 echo 'PASS: migration preserves existing rows/defaults; valid recurrence accepted; invalid updates rejected atomically'
+echo 'PASS: exceptions migration is additive; one change per slot; cascades with its series'
