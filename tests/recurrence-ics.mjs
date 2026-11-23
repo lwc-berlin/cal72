@@ -5,9 +5,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import ts from 'typescript';
 import ICAL from 'ical.js';
-import { expandOccurrences } from '../src/lib/recurrence/expand.mjs';
+import { expandOccurrences, hasScheduledSlot, scheduledLocal } from '../src/lib/recurrence/expand.mjs';
 const source = readFileSync('src/routes/calendar/+server.ts', 'utf8').replace(/^import .*;\n/gm, '');
-const context = vm.createContext({ TextEncoder, console, expandOccurrences });
+const context = vm.createContext({ TextEncoder, console, expandOccurrences, hasScheduledSlot, scheduledLocal });
 vm.runInContext(ts.transpile(source.replace('export const GET', 'const GET'), { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None }) + '\nglobalThis.serialize = generateICal;', context);
 const fixture = { id: 42, title: 'Weekly', description: 'Test', start: '2026-03-15T19:00', end: '2026-03-15T20:00', createdAt: new Date('2026-01-01Z'), sequence: 3, recurrenceIntervalWeeks: 2, recurrenceUntil: '2026-04-12' };
 const serialize = e => context.serialize(new Date('2026-01-01Z'), [e], new Date('2026-03-01Z'), new Date('2026-05-01Z'));
@@ -98,8 +98,8 @@ test('long one-off overlaps explicit range without recurrence duration limit', a
 });
 async function probe(now, rows, headers = {}) {
  class Clock extends Date { constructor(...args) { super(...(args.length ? args : [now])); } }
- const ctx = vm.createContext({ TextEncoder, console, expandOccurrences, Date: Clock, Response, crypto: webcrypto,
-  getAllEvents: async () => rows.filter(e => !e.recurrenceIntervalWeeks), getFeedSeries: async () => rows.filter(e => e.recurrenceIntervalWeeks), pruneDeletedEvents: async () => {} });
+ const ctx = vm.createContext({ TextEncoder, console, expandOccurrences, hasScheduledSlot, scheduledLocal, Date: Clock, Response, crypto: webcrypto,
+  getAllEvents: async () => rows.filter(e => !e.recurrenceIntervalWeeks), getFeedSeries: async () => rows.filter(e => e.recurrenceIntervalWeeks), getFeedExceptions: async () => [], pruneDeletedEvents: async () => {} });
  vm.runInContext(ts.transpile(source.replace('export const GET','const GET'), {target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None})+'\nglobalThis.handler=GET;',ctx);
  const response = await ctx.handler({request:new Request('https://example.test/calendar',{headers})});
  return {status:response.status, body:await response.text(), headers:Object.fromEntries(response.headers)};
@@ -181,4 +181,64 @@ test('explicit window compares one-off Berlin instants without rewriting storage
  assert.equal(result.events[0].start,row.start);
  assert.equal(result.events[0].end,row.end);
  assert.equal((await ctx.list(new Date('2026-07-02T22:00Z'),new Date('2026-07-03T00:00Z'))).events.length,0);
+});
+
+// --- Ticket 02: occurrence exceptions -------------------------------------------------
+const exception = (scheduledDate, extra = {}) => ({ scheduledDate, deleted: false, title: null, description: null,
+ start: null, end: null, clubOverridden: false, clubName: null, sequence: 1, updatedAt: new Date('2026-02-01Z'), ...extra });
+const weekly = { ...fixture, recurrenceIntervalWeeks: 1, recurrenceUntil: null };
+function parseWithExceptions(exceptions, base = weekly) {
+ const calendar = new ICAL.Component(ICAL.parse(serialize({ ...base, exceptions })));
+ ICAL.TimezoneService.register(new ICAL.Timezone(calendar.getFirstSubcomponent('vtimezone')));
+ const events = calendar.getAllSubcomponents('vevent').map(c => new ICAL.Event(c));
+ const master = events.find(e => !e.recurrenceId);
+ for (const e of events.filter(e => e.recurrenceId)) master.relateException(e);
+ return { events, master };
+}
+const detailsOn = (master, iso) => master.getOccurrenceDetails(ICAL.Time.fromString(iso));
+test('moved and partly edited occurrence replaces its slot and inherits unchanged fields', () => {
+ const { events, master } = parseWithExceptions([exception('2026-03-22', { title: 'Special', start: '2026-03-23T10:00', end: '2026-03-23T11:30', sequence: 2 })]);
+ assert.equal(events.length, 2);
+ const moved = events.find(e => e.recurrenceId);
+ assert.equal(moved.uid, '42@cal72');
+ assert.equal(moved.recurrenceId.toString(), '2026-03-22T19:00:00');
+ assert.equal(moved.sequence, 5); // series sequence 3 + exception sequence 2
+ const details = detailsOn(master, '2026-03-22T19:00:00');
+ assert.equal(details.item.summary, 'Special');
+ assert.equal(details.item.description, 'Test');
+ assert.equal(details.startDate.toString(), '2026-03-23T10:00:00');
+ assert.equal(details.endDate.toString(), '2026-03-23T11:30:00');
+ for (const day of ['2026-03-15T19:00:00', '2026-03-29T19:00:00']) assert.equal(detailsOn(master, day).item.summary, 'Weekly');
+});
+test('individual deletion is a cancelled instance carrying a higher sequence', () => {
+ const { events, master } = parseWithExceptions([exception('2026-03-29', { deleted: true, sequence: 3 })]);
+ const cancelled = events.find(e => e.recurrenceId);
+ assert.equal(cancelled.component.getFirstPropertyValue('status'), 'CANCELLED');
+ assert.equal(cancelled.recurrenceId.toString(), '2026-03-29T19:00:00');
+ assert.equal(cancelled.sequence, 6);
+ assert.equal(detailsOn(master, '2026-04-05T19:00:00').item.component.getFirstPropertyValue('status'), null);
+ assert.equal(detailsOn(master, '2026-03-22T19:00:00').item.summary, 'Weekly');
+});
+test('overridden club, including explicit no-club, differs from an inherited club', () => {
+ const club = { ...weekly, club: { id: 1, name: 'Chess', color: null } };
+ const { master } = parseWithExceptions([
+  exception('2026-03-22', { clubOverridden: true, clubName: null }),
+  exception('2026-03-29', { clubOverridden: true, clubName: 'Go' })
+ ], club);
+ assert.equal(detailsOn(master, '2026-03-15T19:00:00').item.summary, 'Weekly [Chess]');
+ assert.equal(detailsOn(master, '2026-03-22T19:00:00').item.summary, 'Weekly');
+ assert.equal(detailsOn(master, '2026-03-29T19:00:00').item.summary, 'Weekly [Go]');
+});
+test('a no-override exception publishes nothing; one-off feeds ignore exceptions', () => {
+ assert.equal(parseWithExceptions([exception('2026-03-22')]).events.length, 1);
+ assert.equal(serialize({ ...fixture, recurrenceIntervalWeeks: null, exceptions: [exception('2026-03-22', { deleted: true })] }), readFileSync('tests/recurrence-ics.fixture', 'utf8'));
+});
+test('exception supersedes a DST end-time correction for the same slot', () => {
+ // 01:30-03:30 lasts three hours on 2026-10-25 (extra hour), so that slot normally gets a correction.
+ const autumn = { ...weekly, start: '2026-10-18T01:30', end: '2026-10-18T03:30', recurrenceUntil: '2026-11-01' };
+ const render = exceptions => new ICAL.Component(ICAL.parse(context.serialize(new Date('2026-01-01Z'), [{ ...autumn, exceptions }], new Date('2026-10-01Z'), new Date('2026-12-01Z'))))
+  .getAllSubcomponents('vevent').map(c => new ICAL.Event(c)).filter(e => e.recurrenceId).map(e => e.recurrenceId.toString());
+ assert.deepEqual(render([]), ['2026-10-25T01:30:00']);
+ assert.deepEqual(render([exception('2026-10-25', { title: 'Own' })]), ['2026-10-25T01:30:00']);
+ assert.equal(render([exception('2026-10-25', { title: 'Own' })]).length, 1);
 });

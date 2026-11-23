@@ -1,7 +1,7 @@
-import { expandOccurrences } from '../../recurrence/expand.mjs';
+import { expandOccurrences, hasScheduledSlot, localToInstant, scheduledLocal } from '../../recurrence/expand.mjs';
 import { db } from './index';
-import { Clubs, Events } from './schema';
-import { and, desc, eq, gte, lte, lt, isNull, isNotNull, sql } from 'drizzle-orm';
+import { Clubs, EventExceptions, Events } from './schema';
+import { and, desc, eq, gte, inArray, lte, lt, isNull, isNotNull, sql } from 'drizzle-orm';
 
 type CreateEvent = typeof Events.$inferInsert;
 type UpdateEvent = {
@@ -187,6 +187,19 @@ export const getWebOccurrences = async (
  type Row = Awaited<ReturnType<typeof getAllEvents>>[number];
  const events: (Row | (Omit<Row, 'id'> & { id: string; seriesId: number; scheduledDate: string }))[] = [];
  const issues: { seriesId: number; message: string }[] = [];
+ // One-off listings never touch exceptions; series rows load theirs in a single query.
+ const exceptionsBySeries = new Map<number, ExceptionRow[]>();
+ const clubsById = new Map<number, { id: number; name: string; color: string | null }>();
+ const seriesIds = rows.filter(row => row.recurrenceIntervalWeeks !== null).map(row => row.id);
+ if (seriesIds.length > 0) {
+  for (const exception of await db.select().from(EventExceptions).where(inArray(EventExceptions.seriesId, seriesIds))) {
+   if (!isEffectiveException(exception)) continue;
+   exceptionsBySeries.set(exception.seriesId, [...(exceptionsBySeries.get(exception.seriesId) ?? []), exception]);
+  }
+  if ([...exceptionsBySeries.values()].some(list => list.some(exception => exception.clubOverridden && exception.club !== null))) {
+   for (const club of await db.select().from(Clubs)) clubsById.set(club.id, club);
+  }
+ }
  for (const row of rows) {
   const { recurrenceIntervalWeeks, recurrenceUntil, ...original } = row;
   if (recurrenceIntervalWeeks === null) {
@@ -214,13 +227,23 @@ export const getWebOccurrences = async (
    const startDate = row.start.slice(0, 10);
    const endDate = row.end.slice(0, 10);
    const endDayOffset = (Date.parse(endDate + 'T00:00:00Z') - Date.parse(startDate + 'T00:00:00Z')) / 86400000;
-   for (const occurrence of expandOccurrences({
+   const schedule = {
     seriesId: String(row.id), startDate, startTime: row.start.slice(11, 16),
     endTime: row.end.slice(11, 16), endDayOffset, recurrenceIntervalWeeks, recurrenceUntil
-   }, { from: lower, to: upper })) {
+   };
+   const exceptions = new Map((exceptionsBySeries.get(row.id) ?? []).map(exception => [exception.scheduledDate, exception]));
+   for (const occurrence of expandOccurrences(schedule, { from: lower, to: upper })) {
+    // A changed or deleted slot is published below (or not at all), never twice.
+    if (exceptions.has(occurrence.scheduledDate)) continue;
     events.push({ ...original, id: occurrence.id, seriesId: row.id,
      scheduledDate: occurrence.scheduledDate,
      start: new Date(occurrence.start).toISOString(), end: new Date(occurrence.end).toISOString() });
+   }
+   // A moved occurrence can leave the range its slot sits in, or enter it from outside.
+   for (const exception of exceptions.values()) {
+    if (exception.deleted || !hasScheduledSlot(schedule, exception.scheduledDate)) continue;
+    const changed = exceptionEvent(original, schedule, exception, clubsById);
+    if (Date.parse(changed.start) < upper && Date.parse(changed.end) > lower) events.push(changed);
    }
   } catch (error) {
    issues.push({ seriesId: row.id, message: error instanceof Error ? error.message : 'Expansion failed' });
@@ -230,22 +253,166 @@ export const getWebOccurrences = async (
  return { events, issues };
 };
 
+type ExceptionRow = typeof EventExceptions.$inferSelect;
+type SeriesSchedule = Parameters<typeof expandOccurrences>[0];
+
+/** True when the exception changes anything; an all-inherited row publishes and hides nothing. */
+const isEffectiveException = (exception: ExceptionRow) =>
+ exception.deleted || exception.title !== null || exception.description !== null ||
+ exception.start !== null || exception.end !== null || exception.clubOverridden;
+
+/** Stable identity of an occurrence: its series and ORIGINAL scheduled start. Exceptions never change it. */
+const occurrenceId = (seriesId: number | string, scheduledDate: string, startTime: string) =>
+ JSON.stringify([String(seriesId), scheduledDate + 'T' + startTime]);
+
+/** Effective occurrence: inherited fields come from the series row, overridden fields from the exception. */
+const exceptionEvent = <T extends { id: number; title: string; description: string; club: { id: number; name: string; color: string | null } | null }>(
+ original: T, schedule: SeriesSchedule, exception: ExceptionRow,
+ clubs: Map<number, { id: number; name: string; color: string | null }>
+) => {
+ const slot = scheduledLocal(schedule, exception.scheduledDate);
+ const start = localToInstant(exception.start ?? slot.start);
+ const end = localToInstant(exception.end ?? slot.end);
+ if (start === undefined || end === undefined || end <= start) throw new RangeError('Changed occurrence has no valid local time');
+ return {
+  ...original,
+  id: occurrenceId(original.id, exception.scheduledDate, schedule.startTime), seriesId: original.id,
+  scheduledDate: exception.scheduledDate,
+  title: exception.title ?? original.title,
+  description: exception.description ?? original.description,
+  club: exception.clubOverridden ? (exception.club === null ? null : clubs.get(exception.club) ?? null) : original.club,
+  start: new Date(start).toISOString(), end: new Date(end).toISOString()
+ };
+};
+
 /** Resolve only canonical scheduled-slot tuples, never numeric prefixes. */
-export const getWebEvent = async (id: string) => {
- if (/^[1-9]\d*$/.test(id)) return getEvent(id);
+const parseOccurrenceId = (id: string) => {
  let tuple: unknown;
  try { tuple = JSON.parse(id); } catch { return undefined; }
  if (!Array.isArray(tuple) || tuple.length !== 2 || JSON.stringify(tuple) !== id ||
   typeof tuple[0] !== 'string' || !/^[1-9]\d*$/.test(tuple[0]) ||
   typeof tuple[1] !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(tuple[1])) return undefined;
- const series = await getEvent(tuple[0]);
- if (!series || series.deletedAt || series.recurrenceIntervalWeeks === null) return undefined;
- const day = Date.parse(tuple[1].slice(0, 10) + 'T00:00:00Z');
- if (!Number.isFinite(day)) return undefined;
- const result = await getWebOccurrences(new Date(day - 367 * 86400000), new Date(day + 367 * 86400000));
- const occurrence = result.events.find(event => event.id === id);
- return occurrence ? { ...series, ...occurrence, club: series.club } : undefined;
+ return { seriesId: tuple[0], scheduledDate: tuple[1].slice(0, 10), startTime: tuple[1].slice(11) };
 };
+
+const scheduleOf = (series: { id: number; start: string; end: string; recurrenceIntervalWeeks: number | null; recurrenceUntil: string | null }): SeriesSchedule => ({
+ seriesId: String(series.id), startDate: series.start.slice(0, 10), startTime: series.start.slice(11, 16),
+ endTime: series.end.slice(11, 16),
+ endDayOffset: (Date.parse(series.end.slice(0, 10) + 'T00:00:00Z') - Date.parse(series.start.slice(0, 10) + 'T00:00:00Z')) / 86400000,
+ recurrenceIntervalWeeks: series.recurrenceIntervalWeeks!, recurrenceUntil: series.recurrenceUntil
+});
+
+const findException = async (seriesId: number, scheduledDate: string) =>
+ (await db.select().from(EventExceptions)
+  .where(and(eq(EventExceptions.seriesId, seriesId), eq(EventExceptions.scheduledDate, scheduledDate))))[0];
+
+/** Series, slot and any exception for a canonical occurrence id; undefined when it is not a live slot. */
+const resolveOccurrence = async (id: string) => {
+ const parsed = parseOccurrenceId(id);
+ if (!parsed) return undefined;
+ const series = await getEvent(parsed.seriesId);
+ if (!series || series.deletedAt || series.recurrenceIntervalWeeks === null) return undefined;
+ const schedule = scheduleOf(series);
+ if (parsed.startTime !== schedule.startTime || !hasScheduledSlot(schedule, parsed.scheduledDate)) return undefined;
+ const exception = await findException(series.id, parsed.scheduledDate);
+ if (exception?.deleted) return undefined;
+ return { series, schedule, scheduledDate: parsed.scheduledDate, exception };
+};
+
+export const getWebEvent = async (id: string) => {
+ if (/^[1-9]\d*$/.test(id)) return getEvent(id);
+ const found = await resolveOccurrence(id);
+ if (!found) return undefined;
+ const { series, schedule, scheduledDate, exception } = found;
+ const slot = scheduledLocal(schedule, scheduledDate);
+ const clubs = new Map<number, { id: number; name: string; color: string | null }>();
+ const changed = exception && isEffectiveException(exception)
+  ? exceptionEvent({ ...series, club: null }, schedule, exception, clubs) : undefined;
+ const start = changed?.start ?? new Date(localToInstant(slot.start)!).toISOString();
+ const end = changed?.end ?? new Date(localToInstant(slot.end)!).toISOString();
+ return {
+  ...series,
+  id, seriesId: series.id, scheduledDate,
+  title: exception?.title ?? series.title,
+  description: exception?.description ?? series.description,
+  club: exception?.clubOverridden ? exception.club : series.club,
+  start, end,
+  // Berlin wall-clock text for forms, which must not round-trip through UTC.
+  localStart: exception?.start ?? slot.start,
+  localEnd: exception?.end ?? slot.end
+ };
+};
+
+export type OccurrenceChanges = {
+ title: string;
+ description: string;
+ start: string;
+ end: string;
+ club: number | null;
+};
+
+/**
+ * Store only the fields that differ from what the series gives this slot, so every other
+ * field keeps inheriting later series updates. A previously stored exception whose fields
+ * all return to the inherited values is kept (with a higher sequence) so subscribers see
+ * the revert; it publishes and hides nothing.
+ */
+export const updateOccurrence = async (id: string, data: OccurrenceChanges) => {
+ const found = await resolveOccurrence(id);
+ if (!found) throw new Error('Occurrence not found');
+ const { series, schedule, scheduledDate } = found;
+ const start = localToInstant(data.start);
+ const end = localToInstant(data.end);
+ if (start === undefined || end === undefined) throw new RangeError('Start and end must be existing Berlin local times');
+ if (start >= end) throw new RangeError('Start date must be before end date');
+ const slot = scheduledLocal(schedule, scheduledDate);
+ const overrides = {
+  title: data.title !== series.title ? data.title : null,
+  description: data.description !== series.description ? data.description : null,
+  start: data.start !== slot.start ? data.start : null,
+  end: data.end !== slot.end ? data.end : null,
+  clubOverridden: data.club !== series.club,
+  club: data.club !== series.club ? data.club : null
+ };
+ const inheritsEverything = Object.values(overrides).every(value => value === null || value === false);
+ const revision = { sequence: sql`${EventExceptions.sequence} + 1`, updatedAt: new Date() };
+ if (inheritsEverything) {
+  const [reverted] = await db.update(EventExceptions).set({ ...overrides, deleted: false, ...revision })
+   .where(and(eq(EventExceptions.seriesId, series.id), eq(EventExceptions.scheduledDate, scheduledDate))).returning();
+  return reverted;
+ }
+ const [saved] = await db.insert(EventExceptions).values({ seriesId: series.id, scheduledDate, ...overrides })
+  .onConflictDoUpdate({ target: [EventExceptions.seriesId, EventExceptions.scheduledDate], set: { ...overrides, deleted: false, ...revision } })
+  .returning();
+ return saved;
+};
+
+/** Individual deletion works for past and future slots and never touches other slots. */
+export const deleteOccurrence = async (id: string) => {
+ const found = await resolveOccurrence(id);
+ if (!found) throw new Error('Occurrence not found');
+ const { series, scheduledDate } = found;
+ const [saved] = await db.insert(EventExceptions).values({ seriesId: series.id, scheduledDate, deleted: true })
+  .onConflictDoUpdate({ target: [EventExceptions.seriesId, EventExceptions.scheduledDate],
+   set: { deleted: true, sequence: sql`${EventExceptions.sequence} + 1`, updatedAt: new Date() } })
+  .returning();
+ return saved;
+};
+
+/** Exceptions for subscription publication, with the overriding club's name resolved. */
+export const getFeedExceptions = async () => db.select({
+ seriesId: EventExceptions.seriesId,
+ scheduledDate: EventExceptions.scheduledDate,
+ deleted: EventExceptions.deleted,
+ title: EventExceptions.title,
+ description: EventExceptions.description,
+ start: EventExceptions.start,
+ end: EventExceptions.end,
+ clubOverridden: EventExceptions.clubOverridden,
+ clubName: Clubs.name,
+ sequence: EventExceptions.sequence,
+ updatedAt: EventExceptions.updatedAt
+}).from(EventExceptions).leftJoin(Clubs, eq(EventExceptions.club, Clubs.id));
 
 /** Raw anchors for subscription publication; never expand into duplicate VEVENTs. */
 export const getFeedSeries = async () => db.select({ ...eventSelect,
