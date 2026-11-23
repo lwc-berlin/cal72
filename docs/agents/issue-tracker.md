@@ -1,30 +1,25 @@
-# Issue tracker: GitHub
+# Issue tracker: Local Markdown
 
-Issues and specs live in `lwc-berlin/cal72`. Use the gh CLI.
+Issues and specs live in this repository under `.scratch/`.
 
-Always pass --repo lwc-berlin/cal72 to gh issue and label commands:
-this clone currently defaults to upstream. Use repos/lwc-berlin/cal72
-for API paths.
+## Layout
 
-- Publish a spec or ticket: gh issue create.
-- Fetch a ticket: gh issue view <number> --json number,title,body,labels,comments.
-- List work: gh issue list --state open, with appropriate label filters.
-- Comment: gh issue comment <number> --body "...".
-- Update labels: gh issue edit <number> --add-label / --remove-label.
-- Close: post an explanation with gh issue comment, then gh issue close.
-  Post comments separately even if the issue is already closed.
-- Link child issues with native sub-issues where supported; otherwise put
-  "Part of #<parent>" in the child and a task-list link in the parent.
-- Record blockers with native issue dependencies where supported;
-  otherwise put "Blocked by: #<number>" at the top of the child.
-  Work is startable only when every blocker is closed.
-- For wayfinding, use a map issue labelled wayfinder:map and linked child
-  tickets labelled wayfinder:<type>. Claim with --add-assignee @me;
-  resolve with an explanation, closure, and a map decision pointer.
-  Create missing wayfinder labels when that workflow is used.
+- One feature per directory: `.scratch/<feature-slug>/`.
+- Spec: `.scratch/<feature-slug>/spec.md`.
+- Implementation tickets: one file per ticket at `.scratch/<feature-slug>/issues/<NN>-<slug>.md`, numbered from `01` in dependency order.
+- Record triage state as a `Status:` line near the top of each spec or ticket. Use the vocabulary in `triage-labels.md`.
+- Record dependencies as `Blocked by:` references to local tickets. A ticket is startable only when all its blockers are complete.
+- Append comments and decisions under `## Comments`.
+- On completion, record verification evidence and set `Status: done`.
 
-## Pull requests as a triage surface
+## Skill operations
 
-**PRs as a request surface: no.**
+- Publish: create the corresponding local Markdown file.
+- Fetch: read the referenced spec or ticket file.
+- List: inspect the feature directories and their status lines.
+- Update: edit the local file, preserving its discussion and evidence.
+- Publish implementation tickets only after the user approves the proposed breakdown.
 
-Never publish issues to upstream or a skills repository without explicit authorization.
+## Hosting
+
+Local Markdown temporarily replaces GitHub Issues because Issues are disabled in `lwc-berlin/cal72`. Do not publish issues elsewhere or change hosting settings without explicit user authorization.
