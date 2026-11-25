@@ -1,10 +1,15 @@
-import { getEvent, updateEvent, getAllClubs } from '$lib/server/db/events';
-import { fail } from '@sveltejs/kit';
+import { getWebEvent, updateEvent, updateOccurrence, getAllClubs } from '$lib/server/db/events';
+import { error, fail } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ params }) => {
+	const event = await getWebEvent(params.id);
+	// A numeric id naming a series row stays closed; only one-offs and single occurrences are editable here.
+	const isOccurrence = !/^[1-9]\d*$/.test(params.id);
+	if (!event || (!isOccurrence && event.recurrenceIntervalWeeks !== null)) error(400, "Unsupported recurring edit or invalid id");
 	return {
-		event: await getEvent(params.id),
+		event,
+		isOccurrence,
 		clubs: await getAllClubs()
 	};
 };
@@ -52,21 +57,22 @@ export const actions: Actions = {
 				club: clubId
 			});
 
-			await updateEvent({
-				id,
+			const changes = {
 				title,
 				description,
 				start,
 				end,
 				club: clubId ? parseInt(clubId) : null
-			});
+			};
+			if (/^[1-9]\d*$/.test(id)) await updateEvent({ id, ...changes });
+			else await updateOccurrence(id, changes);
 
 			return { success: true, message: `Event updated successfully: ${title}` };
 		} catch (error) {
 			console.error('Error updating event:', error);
 			return fail(400, {
 				success: false,
-				message: 'Failed to update event.',
+				message: error instanceof RangeError ? error.message : 'Failed to update event.',
 				title,
 				description,
 				start,

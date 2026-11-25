@@ -1,12 +1,16 @@
 <script lang="ts">
 	import type { PageProps } from './$types';
+	import { onMount } from 'svelte';
+
+	let hydrated = $state(false);
+	onMount(() => { hydrated = true; });
 
 	let { data, form }: PageProps = $props();
 </script>
 
 <main class="create-event">
 	<h1>Create New Event</h1>
-	<form method="post">
+	<form method="post" data-hydrated={hydrated}>
 		{#if form?.success == false}<p class="alert error">{form?.message}</p>{/if}
 		{#if form?.success}<p class="alert success">{form?.message}</p>{/if}
 
@@ -38,6 +42,27 @@
 				<input type="datetime-local" name="end" required value={form?.end ?? data.date ?? ''} />
 			</label>
 		</div>
+
+		<label>
+			Repeat every (weeks)
+			<input
+				type="number"
+				name="recurrenceIntervalWeeks"
+				min="0"
+				max="2147483647"
+				step="1"
+				value={form?.recurrenceIntervalWeeks ?? '0'}
+				aria-describedby="recurrence-help"
+			/>
+		</label>
+		<p id="recurrence-help">
+			0 means no repeat. Use 1 for weekly, or a larger number for every N weeks.
+		</p>
+		<label>
+			Repeat until (optional, inclusive)
+			<input type="date" name="recurrenceUntil" value={form?.recurrenceUntil ?? ''} />
+		</label>
+		<p>For repeating events, choose an end date or leave it empty to repeat indefinitely.</p>
 
 		<label>
 			Club (optional)

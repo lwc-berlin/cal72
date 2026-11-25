@@ -2,6 +2,7 @@
 	import type { PageProps } from './$types';
 	import ConfirmationButton from '$lib/components/ConfirmationButton.svelte';
 	import { formatEventTimespan } from '$lib/utils/dateFormat';
+	import { resolve } from '$app/paths';
 
 	let { data }: PageProps = $props();
 
@@ -28,12 +29,23 @@
 
 	<p class="event-details__description">{data.event?.description}</p>
 
+	{#if data.canMutate}
 	<div class="event-details__actions">
-		<a class="button" href={`/events/${data.event?.id}/edit`}>Edit</a>
-		<ConfirmationButton message="Are you sure you want to delete this event?" action="?/delete">
-			Delete Event
-		</ConfirmationButton>
+		{#if data.isOccurrence}
+			<a class="button" href={resolve('/events/[id]/edit', { id: String(data.event?.id) })}>Edit this occurrence</a>
+			<ConfirmationButton
+				message="Delete only this occurrence? The other occurrences of the series are kept."
+				action="?/delete"
+			>
+				Delete this occurrence
+			</ConfirmationButton>
+		{:else}
+			<a class="button" href={`/events/${data.event?.id}/edit`}>Edit</a>
+			<ConfirmationButton message="Are you sure you want to delete this event?" action="?/delete">
+				Delete Event
+			</ConfirmationButton>
+		{/if}
 	</div>
-
+	{/if}
 	<a href="/events">Back to all events</a>
 </main>
